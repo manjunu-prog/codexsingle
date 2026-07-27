@@ -56,6 +56,28 @@ html,body{
     color:#fff;
 }
 
+#telegramScreenshot{
+    margin-left:auto;
+    background:#229ed9;
+    border-color:#229ed9;
+    color:#fff;
+}
+
+#telegramScreenshot:hover{
+    background:#168ac0;
+}
+
+#telegramScreenshot:disabled{
+    opacity:.55;
+    cursor:not-allowed;
+}
+
+#telegramStatus{
+    color:#64748b;
+    font-size:12px;
+    white-space:nowrap;
+}
+
 #chartContainer{
     flex:1;
     position:relative;
