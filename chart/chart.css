@@ -1,0 +1,315 @@
+/* =====================================================
+   Option Terminal Pro - chart/chart.css
+   ===================================================== */
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+    font-family:Inter,Segoe UI,Arial,sans-serif;
+}
+
+html,body{
+    width:100%;
+    height:100%;
+    overflow:hidden;
+    background:#ffffff;
+    color:#334155;
+}
+
+#terminal{
+    display:flex;
+    flex-direction:column;
+    width:100%;
+    height:100vh;
+    background:#ffffff;
+}
+
+#toolbar{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    height:48px;
+    padding:8px 12px;
+    background:#f8fafc;
+    border-bottom:1px solid #e2e8f0;
+}
+
+#toolbar button{
+    background:#ffffff;
+    color:#334155;
+    border:1px solid #cbd5e1;
+    border-radius:6px;
+    padding:6px 12px;
+    cursor:pointer;
+    transition:.2s;
+    font-size:13px;
+}
+
+#toolbar button:hover{
+    background:#f1f5f9;
+}
+
+#toolbar button.active{
+    background:#2962ff;
+    border-color:#2962ff;
+    color:#fff;
+}
+
+#chartContainer{
+    flex:1;
+    position:relative;
+    overflow:hidden;
+}
+
+#chart{
+    width:100%;
+    height:100%;
+}
+
+.zoneLayer{
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+    z-index:5;
+}
+
+.alphaTrendLayer{
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+    z-index:4;
+}
+
+.alphaTrendLayer svg{
+    display:block;
+    width:100%;
+    height:100%;
+}
+
+.labelLayer{
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+    z-index:7;
+}
+
+.indicatorLabel{
+    position:absolute;
+    transform:translate(-50%,-120%);
+    padding:4px 8px;
+    border-radius:4px;
+    color:#ffffff;
+    font-size:12px;
+    font-weight:800;
+    line-height:1;
+    letter-spacing:0;
+    box-shadow:0 2px 8px rgba(15,23,42,.18);
+    white-space:nowrap;
+}
+
+.indicatorLabel.buy,
+.indicatorLabel.bull{
+    background:#1d4ed8;
+}
+
+.indicatorLabel.buy{
+    transform:translate(-50%,25%);
+}
+
+.indicatorLabel.sell,
+.indicatorLabel.bear{
+    background:#8b0f4d;
+}
+
+.indicatorLabel.bull{
+    background:#14a889;
+}
+
+.indicatorLabel.bear{
+    background:#ef4444;
+}
+
+.indicatorLabel.structure{
+    background:transparent;
+    box-shadow:none;
+    padding:0;
+    font-size:15px;
+    font-weight:500;
+    text-shadow:0 1px 2px rgba(255,255,255,.95);
+}
+
+.indicatorLabel.structure.bull{
+    color:#14a889;
+}
+
+.indicatorLabel.structure.bear{
+    color:#ef4444;
+}
+
+.indicatorLabel.angle{
+    background:transparent;
+    box-shadow:none;
+    padding:0;
+    font-size:13px;
+    font-weight:700;
+    text-shadow:0 1px 2px rgba(255,255,255,.95);
+}
+
+.indicatorLabel.angle.angleHigh{
+    color:#0f766e;
+    transform:translate(-50%,-190%);
+}
+
+.indicatorLabel.angle.angleLow{
+    color:#831843;
+    transform:translate(-50%,90%);
+}
+
+.indicatorLabel.angle.angleDeviation{
+    color:#111827;
+    transform:translate(18px,-50%);
+    font-size:13px;
+}
+
+.indicatorLabel.angle.anglePivotHigh,
+.indicatorLabel.angle.anglePivotLow{
+    width:26px;
+    height:26px;
+    padding:0;
+    border-radius:50%;
+    transform:translate(-50%,-50%);
+}
+
+.indicatorLabel.angle.anglePivotHigh{
+    background:rgba(45,212,191,.30);
+    border:2px solid rgba(45,212,191,.34);
+}
+
+.indicatorLabel.angle.anglePivotHigh::after{
+    content:"";
+    position:absolute;
+    left:50%;
+    top:50%;
+    width:10px;
+    height:10px;
+    border-radius:50%;
+    transform:translate(-50%,-50%);
+    background:#14b8a6;
+}
+
+.indicatorLabel.angle.anglePivotLow{
+    background:rgba(236,72,153,.25);
+    border:2px solid rgba(236,72,153,.34);
+}
+
+.indicatorLabel.angle.anglePivotLow::after{
+    content:"";
+    position:absolute;
+    left:50%;
+    top:50%;
+    width:10px;
+    height:10px;
+    border-radius:50%;
+    transform:translate(-50%,-50%);
+    background:#be185d;
+}
+
+.indicatorLabel.cpr{
+    transform:translate(10px,-50%);
+    padding:3px 7px;
+    border-radius:4px;
+    font-size:12px;
+    font-weight:800;
+    box-shadow:0 1px 4px rgba(15,23,42,.12);
+}
+
+.indicatorLabel.cpr.cprResistance{
+    background:#ef4444;
+    color:#ffffff;
+}
+
+.indicatorLabel.cpr.cprSupport{
+    background:#14a889;
+    color:#ffffff;
+}
+
+.indicatorLabel.cpr.cprCentral{
+    background:#7c3aed;
+    color:#ffffff;
+}
+
+.zoneBox{
+    position:absolute;
+    border-width:1px;
+    border-radius:2px;
+    overflow:hidden;
+    opacity:.95;
+}
+
+.zoneBox span{
+    position:absolute;
+    right:5px;
+    top:50%;
+    transform:translateY(-50%);
+    font-size:11px;
+    font-weight:700;
+    line-height:1;
+    white-space:nowrap;
+    text-shadow:0 1px 2px rgba(255,255,255,.75);
+}
+
+.zoneBox span.centerLabel{
+    left:50%;
+    right:auto;
+    top:50%;
+    transform:translate(-50%,-50%);
+    font-size:15px;
+    font-weight:500;
+    text-shadow:0 1px 2px rgba(255,255,255,.95);
+}
+
+.zoneBox.ifvg{
+    opacity:.78;
+}
+
+.zoneBox.ob{
+    opacity:.86;
+}
+
+.zoneBox.structure{
+    opacity:.96;
+    border-width:1px;
+    border-radius:1px;
+}
+
+#statusBar{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:16px;
+    height:34px;
+    padding:0 12px;
+    background:#f8fafc;
+    border-top:1px solid #e2e8f0;
+    font-size:12px;
+    color:#64748b;
+}
+
+#statusBar span{
+    white-space:nowrap;
+}
+
+::-webkit-scrollbar{
+    width:8px;
+    height:8px;
+}
+
+::-webkit-scrollbar-thumb{
+    background:#cbd5e1;
+    border-radius:4px;
+}
+
+::-webkit-scrollbar-track{
+    background:#ffffff;
+}
