@@ -1086,6 +1086,3 @@ if chart_mode == "Index":
 else:
     render_strike_oi_summary(chain_df, selected_strike)
 render_market_chart(chart_spec, height=760)
-
-render_market_snapshot()
-render_market_heatmap()
