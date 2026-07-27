@@ -591,8 +591,8 @@ with st.sidebar:
         key="strike_window",
     )
     auto_refresh = st.toggle("Auto refresh", value=bool(preferences.get("auto_refresh", True)), key="auto_refresh")
-    refresh_seconds = 600
-    st.caption("Automatic refresh interval: 10 minutes")
+    refresh_seconds = 180
+    st.caption("Automatic refresh interval: 3 minutes")
 
     with st.expander("Data Maintenance", expanded=False):
         reset_confirmed = st.checkbox("Confirm Supabase candle reset", key="reset_supabase_confirmed")
@@ -1060,6 +1060,7 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
         "timeframe": chart_tf_label,
         "chart_id": chart_id,
         "height": height,
+        "telegram_recipients": get_notifier().recipients,
     }
     chart_args.pop("summary", None)
     TradingChart().render(**chart_args)
