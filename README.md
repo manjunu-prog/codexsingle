@@ -51,7 +51,7 @@ The app sends fresh BUY, SELL, BoS, CHoCH, Bullish OB, and Bearish OB alerts up 
 - One selectable chart for the index, CE, or PE
 - Strike selector covering ATM through ±20 strikes
 - FYERS historical candles and option-chain table
-- 30-second auto refresh by default
+- 10-minute automatic refresh with a separate manual refresh button
 - EMA, VWAP, AlphaTrend, FVG/iFVG, order blocks, BoS/CHoCH, and liquidity overlays
 - Click-to-focus candle zoom, chart view persistence, horizontal panning, and drawing delete support
 

@@ -591,13 +591,8 @@ with st.sidebar:
         key="strike_window",
     )
     auto_refresh = st.toggle("Auto refresh", value=bool(preferences.get("auto_refresh", True)), key="auto_refresh")
-    refresh_seconds = st.slider(
-        "Refresh seconds",
-        5,
-        120,
-        int(preference_number(preferences, "refresh_seconds", 30)),
-        key="refresh_seconds",
-    )
+    refresh_seconds = 600
+    st.caption("Automatic refresh interval: 10 minutes")
 
     with st.expander("Data Maintenance", expanded=False):
         reset_confirmed = st.checkbox("Confirm Supabase candle reset", key="reset_supabase_confirmed")
@@ -1029,7 +1024,7 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
     nonce_key = f"refresh_nonce:{chart_id}"
     if nonce_key not in st.session_state:
         st.session_state[nonce_key] = 0
-    if st.button(f"Refresh {spec['title']}", key=f"refresh_button:{chart_id}"):
+    if st.button(f"Manual Refresh {spec['title']}", key=f"refresh_button:{chart_id}"):
         st.session_state[nonce_key] += 1
 
     try:
