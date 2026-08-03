@@ -140,27 +140,12 @@ class HistoricalData:
 
     @staticmethod
     def _to_dataframe(candles):
-
+        # FYERS may include an additional field (typically open interest)
+        # after volume.  The terminal only needs timestamp/OHLC/volume.
+        rows = [list(row[:6]) for row in (candles or []) if isinstance(row, (list, tuple)) and len(row) >= 6]
         df = pd.DataFrame(
-
-            candles,
-
-            columns=[
-
-                "timestamp",
-
-                "open",
-
-                "high",
-
-                "low",
-
-                "close",
-
-                "volume"
-
-            ]
-
+            rows,
+            columns=["timestamp", "open", "high", "low", "close", "volume"],
         )
 
         df["datetime"] = pd.to_datetime(
