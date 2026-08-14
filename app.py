@@ -577,7 +577,7 @@ with st.sidebar:
         index=option_index(index_options, preferences.get("index_name"), 0),
         key="index_name",
     )
-    days = st.slider("History days", 1, 7, min(7, int(preference_number(preferences, "days", 7))), key="days")
+    days = st.slider("History days", 1, 30, int(preference_number(preferences, "days", 5)), key="days")
     latest_session_only = st.toggle(
         "Latest session only",
         value=bool(preferences.get("latest_session_only", True)),
