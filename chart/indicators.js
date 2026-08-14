@@ -107,8 +107,7 @@ class IndicatorEngine {
                 lineWidth:width,
                 lastValueVisible:true,
                 crosshairMarkerVisible:false,
-                priceLineVisible:false,
-                autoscaleInfoProvider: () => null
+                priceLineVisible:false
             });
             line.setData(cleanData);
         });
@@ -230,8 +229,7 @@ class IndicatorEngine {
                     lineStyle: item.style === "dashed" ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
                     lastValueVisible: false,
                     priceLineVisible: false,
-                    crosshairMarkerVisible: false,
-                    autoscaleInfoProvider: () => null
+                    crosshairMarkerVisible: false
                 });
                 line.setData([
                     {time: item.startTime, value: item.startPrice},
@@ -388,8 +386,7 @@ class IndicatorEngine {
                     lineStyle:LightweightCharts.LineStyle.Dotted,
                     lastValueVisible:false,
                     priceLineVisible:false,
-                    crosshairMarkerVisible:false,
-                    autoscaleInfoProvider: () => null
+                    crosshairMarkerVisible:false
                 });
             });
             const last = (this.chartEngine.lastCandles || []).slice(-1)[0];
@@ -767,8 +764,7 @@ class IndicatorEngine {
                     lineStyle:level.style === "dashed" ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
                     lastValueVisible:false,
                     priceLineVisible:false,
-                    crosshairMarkerVisible:false,
-                    autoscaleInfoProvider: () => null
+                    crosshairMarkerVisible:false
                 });
                 line.setData([
                     {time:level.startTime || level.time,value:level.price},
@@ -793,8 +789,7 @@ class IndicatorEngine {
                     lineWidth:2,
                     lastValueVisible:false,
                     priceLineVisible:false,
-                    crosshairMarkerVisible:false,
-                    autoscaleInfoProvider: () => null
+                    crosshairMarkerVisible:false
                 });
                 trendLine.setData([
                     {time:line.startTime,value:line.startPrice},
