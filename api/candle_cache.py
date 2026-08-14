@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from typing import Any
 
@@ -104,6 +104,20 @@ class SupabaseCandleCache:
                 requests.post(self.endpoint, headers=self.headers, json=rows[start : start + 500], timeout=20)
             except requests.RequestException:
                 return
+
+    def cleanup(self, keep_days: int = 4) -> None:
+        if not self.enabled:
+            return
+        cutoff = int((datetime.now() - timedelta(days=keep_days)).timestamp())
+        try:
+            requests.delete(
+                self.endpoint,
+                headers=self.headers,
+                params={"timestamp": f"lt.{cutoff}"},
+                timeout=12,
+            )
+        except requests.RequestException:
+            return
 
     def reset_all(self) -> tuple[bool, str]:
         if not self.enabled:
