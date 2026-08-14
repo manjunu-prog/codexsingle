@@ -1,11 +1,11 @@
-# Option Terminal Pro - Single Chart
+# Option Terminal Pro
 
-Local Streamlit trading terminal for NIFTY, BANKNIFTY, and SENSEX with one selectable spot/CE/PE chart using FYERS data. Option strikes are limited to ATM through ±20 strikes.
+Local Streamlit trading terminal for NIFTY, BANKNIFTY, FINNIFTY, and SENSEX spot plus CE/PE option-strike candles using FYERS data.
 
 ## Run
 
 ```bash
-cd OptionTerminalSingleChart
+cd OptionTerminal
 python3 -m pip install -r requirements.txt
 python3 -m streamlit run app.py
 ```
@@ -48,10 +48,10 @@ The app sends fresh BUY, SELL, BoS, CHoCH, Bullish OB, and Bearish OB alerts up 
 
 ## Included
 
-- One selectable chart for the index, CE, or PE
-- Strike selector covering ATM through ±20 strikes
+- Full-width index chart with CE and PE charts below
+- Separate CE and PE strike selectors
 - FYERS historical candles and option-chain table
-- 10-minute automatic refresh with a separate manual refresh button
+- 30-second auto refresh by default
 - EMA, VWAP, AlphaTrend, FVG/iFVG, order blocks, BoS/CHoCH, and liquidity overlays
 - Click-to-focus candle zoom, chart view persistence, horizontal panning, and drawing delete support
 
@@ -81,6 +81,16 @@ create index if not exists candles_lookup_idx
 on public.candles (symbol, resolution, timestamp);
 ```
 
-The app reads and stores up to 7 days of candle history. Supabase candle rows are not deleted automatically; they remain available until you confirm and use **Reset Supabase Data** in the app's Data Maintenance section. If Supabase secrets are missing, the app automatically falls back to direct FYERS pulls.
+The app keeps roughly the last 4 days by deleting older candle rows during refresh. If Supabase secrets are missing, the app automatically falls back to direct FYERS pulls.
 
 The same SQL file also creates `signal_alerts`, which prevents duplicate Telegram alerts on refresh.
+
+## Professional Paper Trading
+
+Run the standalone paper-trading app with `python3 -m streamlit run paper_app.py`. It creates 12 independent paper portfolios:
+
+- NIFTY Slot 1–4
+- BANKNIFTY Slot 1–4
+- SENSEX Slot 1–4
+
+All portfolios use live FYERS quotes but simulated orders only. Market buys use the live ask and market sells use the live bid when available; limit and stop orders remain pending until the next refresh meets their trigger. Orders, fills, positions, cash, P&L, and equity snapshots are stored in `data/paper_trading.db` and can be exported as CSV or Excel. No paper action calls a FYERS order API.

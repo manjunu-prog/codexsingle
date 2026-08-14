@@ -26,7 +26,7 @@ ASSET_DIR.mkdir(exist_ok=True)
 # APPLICATION
 # =========================================================
 
-APP_NAME = "Option Terminal Pro - Single Chart"
+APP_NAME = "Option Terminal Pro"
 
 VERSION = "0.1.0"
 
@@ -91,6 +91,7 @@ WATCHLIST = [
 INDEX_CONFIG = {
     "NIFTY": {"spot": "NSE:NIFTY50-INDEX", "exchange": "NSE", "step": 50, "strikecount": 10},
     "BANKNIFTY": {"spot": "NSE:NIFTYBANK-INDEX", "exchange": "NSE", "step": 100, "strikecount": 10},
+    "FINNIFTY": {"spot": "NSE:FINNIFTY-INDEX", "exchange": "NSE", "step": 50, "strikecount": 10},
     "SENSEX": {"spot": "BSE:SENSEX-INDEX", "exchange": "BSE", "step": 100, "strikecount": 10},
 }
 

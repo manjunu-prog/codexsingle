@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import yfinance as yf
 from streamlit_autorefresh import st_autorefresh
 
-from api.alerts import TelegramNotifier, app_login_code, format_signal_time, signal_key
+from api.alerts import TelegramNotifier, app_login_code
 from api.candle_cache import SupabaseCandleCache
 from api.fyers_login import FyersLogin
 from api.historical import HistoricalData
@@ -23,12 +23,13 @@ from indicators.core import angle_market, alphatrend, cpr, ema, fvg_ifvg_order_b
 
 st.set_page_config(page_title=APP_NAME, layout="wide")
 
+APP_BUILD = "2026-08-03-candle-v5"
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 PREFERENCES_FILE = DATA_DIR / "last_activity.json"
 INDICATOR_OPTIONS = ["AlphaTrend", "EMA", "VWAP", "CPR", "Angle Market", "FVG", "iFVG", "Order Blocks", "PA Toolkit"]
 TOP_SPOT_QUOTES = {
-    "NIFTY": INDEX_CONFIG["NIFTY"]["spot"],
+    "CRUDEOIL": "MCX:CRUDEOIL26JULFUT",
     "BANKNIFTY": INDEX_CONFIG["BANKNIFTY"]["spot"],
     "SENSEX": INDEX_CONFIG["SENSEX"]["spot"],
 }
@@ -96,6 +97,14 @@ def preference_number(preferences: dict, key: str, default):
     return default if value is None else value
 
 
+def clamp_number(value, low: int, high: int, default: int) -> int:
+    try:
+        number = int(value)
+    except Exception:
+        number = default
+    return max(low, min(high, number))
+
+
 def require_login() -> None:
     code = app_login_code()
     if not code:
@@ -118,6 +127,7 @@ def require_login() -> None:
 
 require_login()
 st.title("Option Terminal Pro")
+st.caption(f"Build {APP_BUILD}")
 preferences = load_preferences()
 
 
@@ -146,7 +156,14 @@ def get_client(credentials: dict):
 
 
 @st.cache_data(ttl=20, show_spinner=False)
-def load_candles(_client, symbol: str, resolution: str, days: int, refresh_nonce: int = 0) -> pd.DataFrame:
+def load_candles(
+    _client,
+    symbol: str,
+    resolution: str,
+    days: int,
+    refresh_nonce: int = 0,
+    parser_version: str = APP_BUILD,
+) -> pd.DataFrame:
     return HistoricalData(client=_client).get_candles(symbol, resolution, days)
 
 
@@ -172,6 +189,13 @@ def is_market_live(market: dict, now_utc: datetime) -> bool:
     if local_now.weekday() >= 5:
         return False
     return market["open"] <= local_now.time() <= market["close"]
+
+
+def is_india_market_live(now_ist: datetime | None = None) -> bool:
+    now_ist = now_ist or datetime.now(ZoneInfo("Asia/Kolkata"))
+    if now_ist.weekday() >= 5:
+        return False
+    return time(9, 15) <= now_ist.time() <= time(15, 30)
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -584,15 +608,28 @@ with st.sidebar:
         key="latest_session_only",
     )
     strike_window = st.slider(
-        "Strike window around ATM",
+        "Strike window",
         1,
-        20,
-        min(20, int(preference_number(preferences, "strike_window", 20))),
+        10,
+        min(10, int(preference_number(preferences, "strike_window", INDEX_CONFIG[index_name]["strikecount"]))),
         key="strike_window",
     )
     auto_refresh = st.toggle("Auto refresh", value=bool(preferences.get("auto_refresh", True)), key="auto_refresh")
-    refresh_seconds = 180
-    st.caption("Automatic refresh interval: 3 minutes")
+    saved_refresh_seconds = preference_number(preferences, "refresh_seconds", 300)
+    try:
+        saved_refresh_number = int(saved_refresh_seconds or 0)
+    except Exception:
+        saved_refresh_number = 300
+    if saved_refresh_number < 60:
+        saved_refresh_seconds = 300
+    refresh_seconds = st.slider(
+        "Refresh seconds",
+        60,
+        600,
+        clamp_number(saved_refresh_seconds, 60, 600, 300),
+        step=60,
+        key="refresh_seconds",
+    )
 
     with st.expander("Data Maintenance", expanded=False):
         reset_confirmed = st.checkbox("Confirm Supabase candle reset", key="reset_supabase_confirmed")
@@ -656,9 +693,12 @@ try:
 except Exception:
     pass
 
-selected_strike = None
-chart_mode = "Index"
-chart_spec = {"title": "Index", "symbol": spot_symbol, "label": index_name, "chart_id": f"{index_name}:INDEX"}
+selected_symbol = spot_symbol
+selected_ce_strike = None
+selected_pe_strike = None
+index_chart_spec = {"title": "Index", "symbol": spot_symbol, "label": index_name, "chart_id": f"{index_name}:INDEX"}
+ce_chart_spec = None
+pe_chart_spec = None
 
 show_ema = False
 ema_periods = [20]
@@ -682,49 +722,71 @@ liquidity_len = 30
 
 if not chain_df.empty:
     st.subheader("Strikes")
-    all_strikes = sorted(chain_df["strike"].unique().tolist())
-    strikes = [
-        strike for strike in all_strikes
-        if atm is None or abs(int(strike) - int(atm)) <= index_cfg["step"] * strike_window
-    ] or all_strikes
+    strikes = sorted(chain_df["strike"].unique().tolist())
     default_idx = strikes.index(atm) if atm in strikes else len(strikes) // 2
-    strike_labels = [f"{strike} (ATM)" if strike == atm else str(strike) for strike in strikes]
-    saved_strike_idx = option_index(strikes, preferences.get("selected_strike"), default_idx)
-    chart_mode = st.radio(
-        "Chart instrument",
-        ["Index", "CE", "PE"],
-        index=option_index(["Index", "CE", "PE"], preferences.get("chart_mode"), 0),
-        horizontal=True,
-        key="chart_mode_main",
+    ce_default_idx = option_index(strikes, preferences.get("selected_ce_strike"), default_idx)
+    pe_default_idx = option_index(strikes, preferences.get("selected_pe_strike"), default_idx)
+    strike_cols = st.columns(2)
+    selected_ce_strike = strike_cols[0].radio(
+        "CE strike",
+        strikes,
+        index=ce_default_idx,
+        key="ce_strike_main",
     )
-    selected_strike_label = st.selectbox(
-        "Strike",
-        strike_labels,
-        index=saved_strike_idx,
-        disabled=chart_mode == "Index",
-        key="selected_strike_main",
+    selected_pe_strike = strike_cols[1].radio(
+        "PE strike",
+        strikes,
+        index=pe_default_idx,
+        key="pe_strike_main",
     )
-    selected_strike = strikes[strike_labels.index(selected_strike_label)]
 
-    if chart_mode in {"CE", "PE"}:
-        option_row = chain_df[(chain_df["strike"] == selected_strike) & (chain_df["type"] == chart_mode)]
-        if not option_row.empty:
-            chart_spec = {
-                "title": chart_mode,
-                "symbol": option_row.iloc[0]["symbol"],
-                "label": f"{index_name} {selected_strike} {chart_mode}",
-                "chart_id": f"{index_name}:{chart_mode}:{selected_strike}",
-            }
+    ce_row = chain_df[(chain_df["strike"] == selected_ce_strike) & (chain_df["type"] == "CE")]
+    if not ce_row.empty:
+        ce_chart_spec = {
+            "title": "CE",
+            "symbol": ce_row.iloc[0]["symbol"],
+            "label": f"{index_name} {selected_ce_strike} CE",
+            "chart_id": f"{index_name}:CE",
+        }
 
-st.subheader("Chart Timeframe")
+    pe_row = chain_df[(chain_df["strike"] == selected_pe_strike) & (chain_df["type"] == "PE")]
+    if not pe_row.empty:
+        pe_chart_spec = {
+            "title": "PE",
+            "symbol": pe_row.iloc[0]["symbol"],
+            "label": f"{index_name} {selected_pe_strike} PE",
+            "chart_id": f"{index_name}:PE",
+        }
+
+st.subheader("Chart Timeframes")
 fallback_tf = preferences.get("tf_label", "5 Min")
-tf_label = st.selectbox(
-    "Timeframe",
+index_tf_default = preferences.get("index_tf_label", fallback_tf)
+ce_tf_default = preferences.get("ce_tf_label", index_tf_default)
+pe_tf_default = preferences.get("pe_tf_label", index_tf_default)
+tf_cols = st.columns(3)
+index_tf_label = tf_cols[0].selectbox(
+    "Index timeframe",
     timeframe_options,
-    index=option_index(timeframe_options, fallback_tf, 3),
-    key="tf_label_main",
+    index=option_index(timeframe_options, index_tf_default, 3),
+    key="index_tf_label_main",
 )
-chart_spec["tf_label"] = tf_label
+ce_tf_label = tf_cols[1].selectbox(
+    "CE timeframe",
+    timeframe_options,
+    index=option_index(timeframe_options, ce_tf_default, option_index(timeframe_options, index_tf_label, 3)),
+    key="ce_tf_label_main",
+)
+pe_tf_label = tf_cols[2].selectbox(
+    "PE timeframe",
+    timeframe_options,
+    index=option_index(timeframe_options, pe_tf_default, option_index(timeframe_options, index_tf_label, 3)),
+    key="pe_tf_label_main",
+)
+index_chart_spec["tf_label"] = index_tf_label
+if ce_chart_spec:
+    ce_chart_spec["tf_label"] = ce_tf_label
+if pe_chart_spec:
+    pe_chart_spec["tf_label"] = pe_tf_label
 
 st.subheader("Indicators")
 saved_indicators = preferences.get("selected_indicators", ["AlphaTrend"])
@@ -829,14 +891,17 @@ if show_structure:
 save_preferences(
     {
         "index_name": index_name,
-        "tf_label": tf_label,
-        "chart_mode": chart_mode,
+        "tf_label": index_tf_label,
+        "index_tf_label": index_tf_label,
+        "ce_tf_label": ce_tf_label,
+        "pe_tf_label": pe_tf_label,
         "days": int(days),
         "latest_session_only": bool(latest_session_only),
         "strike_window": int(strike_window),
         "auto_refresh": bool(auto_refresh),
         "refresh_seconds": int(refresh_seconds),
-        "selected_strike": int(selected_strike) if selected_strike is not None else None,
+        "selected_ce_strike": int(selected_ce_strike) if selected_ce_strike is not None else None,
+        "selected_pe_strike": int(selected_pe_strike) if selected_pe_strike is not None else None,
         "selected_indicators": list(selected_indicators),
         "ema_periods": [int(period) for period in ema_periods],
         "show_cpr_pivots": bool(show_cpr_pivots),
@@ -861,7 +926,7 @@ def build_overlays(df: pd.DataFrame) -> dict:
     if show_ob:
         visible_kinds.add("ob")
 
-    all_zones = fvg_ifvg_order_blocks(df) if visible_kinds or get_notifier().enabled else []
+    all_zones = fvg_ifvg_order_blocks(df) if visible_kinds else []
     zones = [zone for zone in all_zones if zone.get("kind") in visible_kinds]
     return {
         "emas": [{"period": period, "data": ema(df, period)} for period in ema_periods] if show_ema else [],
@@ -883,7 +948,6 @@ def build_overlays(df: pd.DataFrame) -> dict:
         if show_alphatrend
         else None,
         "zones": zones,
-        "alert_zones": all_zones,
         "structure": market_structure(
             df,
             lookback=int(structure_len),
@@ -898,6 +962,9 @@ def build_overlays(df: pd.DataFrame) -> dict:
 def latest_session_df(df: pd.DataFrame, chart_tf_label: str) -> pd.DataFrame:
     if df.empty or TIMEFRAMES[chart_tf_label] == "D":
         return df
+    today_ist = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    if is_india_market_live() and bool((df.index.date == today_ist).any()):
+        return df[df.index.date == today_ist]
     latest_date = df.index.max().date()
     return df[df.index.date == latest_date]
 
@@ -946,105 +1013,47 @@ def trim_overlays(overlays: dict, df: pd.DataFrame) -> dict:
     return trimmed
 
 
-def send_fresh_alerts(spec: dict, df: pd.DataFrame, overlays: dict) -> None:
-    notifier = get_notifier()
-    if not notifier.enabled or df.empty:
-        return
-
-    chart_tf_label = spec.get("tf_label", tf_label)
-    last_ts = int(df.index.max().timestamp())
-    freshness = 10 * 60
-    signals: list[dict] = []
-
-    for marker in (overlays.get("alphatrend") or {}).get("markers", []):
-        text = marker.get("text")
-        timestamp = int(marker.get("time", 0) or 0)
-        if text not in {"BUY", "SELL"} or timestamp < last_ts - freshness:
-            continue
-        signals.append(
-            {
-                "kind": text,
-                "time": timestamp,
-                "price": marker.get("price"),
-            }
-        )
-
-    for level in (overlays.get("structure") or {}).get("levels", []):
-        label = str(level.get("label", ""))
-        timestamp = int(level.get("endTime") or level.get("time") or 0)
-        if label not in {"BoS", "CHoCH"} or timestamp < last_ts - freshness:
-            continue
-        signals.append(
-            {
-                "kind": label,
-                "time": timestamp,
-                "price": level.get("price"),
-            }
-        )
-
-    for zone in overlays.get("alert_zones") or []:
-        if zone.get("kind") != "ob":
-            continue
-        timestamp = int(zone.get("endTime") or zone.get("startTime") or 0)
-        if timestamp < last_ts - freshness:
-            continue
-        direction = zone.get("direction")
-        label = "Bullish OB" if direction == "bullish" else "Bearish OB"
-        signals.append(
-            {
-                "kind": label,
-                "time": timestamp,
-                "price": zone.get("bottom") if direction == "bullish" else zone.get("top"),
-            }
-        )
-
-    for item in signals:
-        key = signal_key(spec["chart_id"], spec["symbol"], item["kind"], item["time"], item.get("price"))
-        price_text = f" @ {float(item['price']):,.2f}" if item.get("price") is not None else ""
-        message = (
-            f"Option Terminal Signal\n"
-            f"{spec['label']} | {chart_tf_label}\n"
-            f"{item['kind']}{price_text}\n"
-            f"{format_signal_time(item['time'])}"
-        )
-        notifier.send_repeating(
-            {
-                "signal_key": key,
-                "symbol": spec["label"],
-                "signal_type": item["kind"],
-                "signal_time": item["time"],
-                "message": message,
-            }
-        )
-
-
 def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, dict] | tuple[None, None]:
     chart_id = spec.get("chart_id", spec["label"])
-    chart_tf_label = spec.get("tf_label", tf_label)
+    chart_tf_label = spec.get("tf_label", index_tf_label)
     nonce_key = f"refresh_nonce:{chart_id}"
     if nonce_key not in st.session_state:
         st.session_state[nonce_key] = 0
-    if st.button(f"Manual Refresh {spec['title']}", key=f"refresh_button:{chart_id}"):
+    if st.button(f"Refresh {spec['title']}", key=f"refresh_button:{chart_id}"):
         st.session_state[nonce_key] += 1
 
     try:
         chart_df = load_candles(client, spec["symbol"], TIMEFRAMES[chart_tf_label], days, st.session_state[nonce_key])
     except Exception as exc:
-        st.error(f"{spec['label']} candles failed: {exc}")
+        st.error(f"{spec['label']} candles failed [{APP_BUILD}]: {exc}")
         return None, None
 
     if chart_df.empty:
         st.warning(f"{spec['label']} returned no candles.")
         return None, None
 
+    chart_resolution = TIMEFRAMES[chart_tf_label]
+    if latest_session_only and chart_resolution != "D":
+        today_ist = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+        latest_available = chart_df.index.max()
+        if is_india_market_live() and latest_available.date() < today_ist:
+            debug = chart_df.attrs.get("history_debug", "")
+            details = f" Fyers debug: {debug}" if debug else ""
+            st.error(
+                f"{spec['label']} has no candles for today's session yet. "
+                f"Latest available candle is {latest_available.strftime('%d %b %H:%M')}.{details}"
+            )
+            return None, None
+
     display_df = latest_session_df(chart_df, chart_tf_label) if latest_session_only else chart_df
     overlays = trim_overlays(build_overlays(chart_df), display_df)
-    send_fresh_alerts(spec, chart_df, overlays)
     last_row = display_df.iloc[-1]
     delta = volume_delta(display_df.tail(80))
+    latest_candle_time = display_df.index.max().strftime("%d %b %H:%M")
     st.caption(
         f"{spec['label']} | Last {last_row.close:,.2f} | "
-        f"Delta {delta['delta']:,.0f} ({delta['delta_pct']:.1f}%) | Candles {len(display_df):,}"
+        f"Delta {delta['delta']:,.0f} ({delta['delta_pct']:.1f}%) | "
+        f"Candles {len(display_df):,} | Latest {latest_candle_time}"
     )
     chart_args = {
         "candles": HistoricalData.candle_json(display_df),
@@ -1072,13 +1081,23 @@ metric_cols[0].metric("Index", index_name)
 metric_cols[1].metric("Spot", f"{spot_ltp:,.2f}" if spot_ltp else "-")
 metric_cols[2].metric("ATM", f"{atm}" if atm else "-")
 metric_cols[3].metric(
-    "Chart",
-    f"{chart_mode} {selected_strike or ''}".strip(),
+    "Strikes",
+    f"CE {selected_ce_strike or '-'} / PE {selected_pe_strike or '-'}",
 )
 
-st.subheader(chart_spec["title"])
-if chart_mode == "Index":
-    render_index_oi_summary(chain_df)
-else:
-    render_strike_oi_summary(chain_df, selected_strike)
-render_market_chart(chart_spec, height=760)
+st.subheader(index_chart_spec["title"])
+render_index_oi_summary(chain_df)
+render_market_chart(index_chart_spec, height=760)
+
+option_cols = st.columns(2)
+for col, spec, strike in zip(option_cols, [ce_chart_spec, pe_chart_spec], [selected_ce_strike, selected_pe_strike]):
+    with col:
+        if not spec:
+            st.info("Option chart is unavailable for the selected strike.")
+            continue
+        st.subheader(spec["title"])
+        render_strike_oi_summary(chain_df, strike)
+        render_market_chart(spec, height=760)
+
+render_market_snapshot()
+render_market_heatmap()
