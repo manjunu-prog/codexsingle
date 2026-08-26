@@ -19,17 +19,7 @@ from api.historical import HistoricalData
 from api.option_chain import OptionChain
 from chart.chart import TradingChart
 from config import APP_NAME, FYERS, INDEX_CONFIG, TIMEFRAMES
-from indicators.core import (
-    angle_market,
-    alphatrend,
-    cpr,
-    ema,
-    fvg_ifvg_order_blocks,
-    market_structure,
-    volume_delta,
-    volume_poc_profile,
-    vwap,
-)
+from indicators.core import angle_market, alphatrend, cpr, ema, fvg_ifvg_order_blocks, market_structure, volume_delta, volume_poc_profile, vwap
 
 st.set_page_config(page_title=APP_NAME, layout="wide")
 
