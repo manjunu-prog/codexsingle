@@ -16,6 +16,7 @@ class IndicatorEngine {
 
         this.chart = chartEngine.chart;
         this.series = {};
+        this.priceLines = {};
         this.zones = [];
         this.structureZones = [];
         this.volumePocLevels = [];
@@ -215,12 +216,27 @@ class IndicatorEngine {
     setVolumePOC(data){
 
         this.removeByPrefix("VPOC_");
+        (this.priceLines.volumePoc || []).forEach(line=>{
+            try{ this.chartEngine.candleSeries.removePriceLine(line); }catch(e){}
+        });
+        this.priceLines.volumePoc = [];
         this.volumePocLevels = (data && data.levels ? data.levels : []).filter(level =>
             level &&
             level.startTime != null &&
             level.endTime != null &&
             Number.isFinite(level.price)
         );
+        this.volumePocLevels.forEach(level=>{
+            const line = this.chartEngine.candleSeries.createPriceLine({
+                price: level.price,
+                color: level.color || (level.kind === "present" ? "#111827" : "#64748b"),
+                lineWidth: level.width || (level.kind === "present" ? 3 : 2),
+                lineStyle: level.style === "dashed" ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
+                axisLabelVisible: true,
+                title: level.label || "POC"
+            });
+            this.priceLines.volumePoc.push(line);
+        });
         this.renderVolumePOC();
         setTimeout(()=>this.renderVolumePOC(), 100);
 
