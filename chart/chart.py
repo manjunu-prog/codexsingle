@@ -24,6 +24,7 @@ class TradingChart:
         ema=None,
         vwap=None,
         cpr=None,
+        volume_poc=None,
         angle_market=None,
         alphatrend=None,
         fvg=None,
@@ -62,6 +63,7 @@ window.addEventListener("load", function(){{
         {f'window.Indicators.setEMAs({json.dumps(emas)});' if emas else ''}
         {f'window.Indicators.setVWAP({json.dumps(vwap)});' if vwap else ''}
         {f'window.Indicators.setCPR({json.dumps(cpr)});' if cpr else ''}
+        {f'window.Indicators.setVolumePOC({json.dumps(volume_poc)});' if volume_poc else ''}
         {f'window.Indicators.setAngleMarket({json.dumps(angle_market)});' if angle_market else ''}
         {f'window.Indicators.setAlphaTrend({json.dumps(alphatrend)});' if alphatrend else ''}
         {f'window.Indicators.setFVG({json.dumps(fvg)});' if fvg else ''}

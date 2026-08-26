@@ -207,6 +207,46 @@ class IndicatorEngine {
 
     }
 
+    setVolumePOC(data){
+
+        this.removeByPrefix("VPOC_");
+        const levels = data && data.levels ? data.levels : [];
+        levels.forEach((level,index)=>{
+            if(
+                !level ||
+                level.startTime == null ||
+                level.endTime == null ||
+                !Number.isFinite(level.price)
+            ) return;
+
+            let line = null;
+            this.withChartViewProtected(()=>{
+                line = this.chart.addLineSeries({
+                    color: level.color || "#111827",
+                    lineWidth: level.width || 2,
+                    lineStyle: level.style === "dashed" ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
+                    lastValueVisible: false,
+                    priceLineVisible: false,
+                    crosshairMarkerVisible: false,
+                    autoscaleInfoProvider: () => null
+                });
+                line.setData([
+                    {time: level.startTime, value: level.price},
+                    {time: level.endTime, value: level.price}
+                ]);
+            });
+            this.series[`VPOC_${index}`] = line;
+        });
+
+        this.setLabels("volumePoc", levels.map(level=>({
+            time: level.labelTime || level.endTime,
+            price: level.price,
+            text: level.label,
+            tone: level.kind === "present" ? "present" : "previous"
+        })));
+
+    }
+
     setAngleMarket(data){
 
         this.removeByPrefix("ANGLE_");
