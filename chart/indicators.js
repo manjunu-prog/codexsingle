@@ -18,13 +18,16 @@ class IndicatorEngine {
         this.series = {};
         this.zones = [];
         this.structureZones = [];
+        this.volumePocLevels = [];
         this.alphaTrendFill = [];
         this.labels = [];
         this.zoneWatchFrame = null;
         this.alphaTrendFrame = null;
+        this.volumePocFrame = null;
         this.overlayTrackingFrame = null;
         this.lastZoneSignature = "";
         this.lastAlphaTrendSignature = "";
+        this.lastVolumePocSignature = "";
         this.alphaTrendLayer = this.createAlphaTrendLayer();
         this.zoneLayer = this.createZoneLayer();
         this.labelLayer = this.createLabelLayer();
@@ -34,11 +37,13 @@ class IndicatorEngine {
         this.chart.timeScale().subscribeVisibleTimeRangeChange(()=>{
             this.renderAlphaTrendFill();
             this.renderZones();
+            this.renderVolumePOC();
             this.renderLabels();
         });
         window.addEventListener("resize",()=>{
             this.renderAlphaTrendFill();
             this.renderZones();
+            this.renderVolumePOC();
             this.renderLabels();
         });
         this.chartEngine.container.addEventListener("pointermove",()=>{
@@ -210,35 +215,16 @@ class IndicatorEngine {
     setVolumePOC(data){
 
         this.removeByPrefix("VPOC_");
-        const levels = data && data.levels ? data.levels : [];
-        levels.forEach((level,index)=>{
-            if(
-                !level ||
-                level.startTime == null ||
-                level.endTime == null ||
-                !Number.isFinite(level.price)
-            ) return;
+        this.volumePocLevels = (data && data.levels ? data.levels : []).filter(level =>
+            level &&
+            level.startTime != null &&
+            level.endTime != null &&
+            Number.isFinite(level.price)
+        );
+        this.renderVolumePOC();
+        setTimeout(()=>this.renderVolumePOC(), 100);
 
-            let line = null;
-            this.withChartViewProtected(()=>{
-                line = this.chart.addLineSeries({
-                    color: level.color || "#111827",
-                    lineWidth: level.width || 2,
-                    lineStyle: level.style === "dashed" ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
-                    lastValueVisible: false,
-                    priceLineVisible: false,
-                    crosshairMarkerVisible: false,
-                    autoscaleInfoProvider: () => null
-                });
-                line.setData([
-                    {time: level.startTime, value: level.price},
-                    {time: level.endTime, value: level.price}
-                ]);
-            });
-            this.series[`VPOC_${index}`] = line;
-        });
-
-        this.setLabels("volumePoc", levels.map(level=>({
+        this.setLabels("volumePoc", this.volumePocLevels.map(level=>({
             time: level.labelTime || level.endTime,
             price: level.price,
             text: level.label,
@@ -460,6 +446,7 @@ class IndicatorEngine {
 
         this.scheduleAlphaTrendRender();
         this.scheduleZoneRender();
+        this.scheduleVolumePOCRender();
         this.scheduleLabelRender();
 
     }
@@ -470,6 +457,7 @@ class IndicatorEngine {
         const tick = ()=>{
             this.renderAlphaTrendFill(false);
             this.renderZones(false);
+            this.renderVolumePOC(false);
             this.renderLabels();
             this.overlayTrackingFrame = requestAnimationFrame(tick);
         };
@@ -484,6 +472,7 @@ class IndicatorEngine {
         this.overlayTrackingFrame = null;
         this.renderAlphaTrendFill();
         this.renderZones();
+        this.renderVolumePOC();
         this.renderLabels();
 
     }
@@ -526,6 +515,17 @@ class IndicatorEngine {
 
         if(!this.labels || this.labels.length === 0) return;
         requestAnimationFrame(()=>this.renderLabels());
+
+    }
+
+    scheduleVolumePOCRender(){
+
+        if(this.volumePocFrame != null || !this.volumePocLevels || this.volumePocLevels.length === 0) return;
+
+        this.volumePocFrame = requestAnimationFrame(()=>{
+            this.volumePocFrame = null;
+            this.renderVolumePOC(false);
+        });
 
     }
 
@@ -659,6 +659,57 @@ class IndicatorEngine {
             }
             this.zoneLayer.appendChild(box);
 
+        });
+        this.renderVolumePOC(false);
+
+    }
+
+    renderVolumePOC(force=true){
+
+        if(!this.zoneLayer || !this.chartEngine || !this.chartEngine.candleSeries) return;
+
+        const width = this.chartEngine.container.clientWidth || 1;
+        const rendered = [];
+
+        (this.volumePocLevels || []).forEach(level=>{
+            const x1 = this.timeToCoordinate(level.startTime);
+            const x2 = this.timeToCoordinate(level.endTime);
+            const y = this.chartEngine.candleSeries.priceToCoordinate(level.price);
+            if(x1 == null || x2 == null || y == null) return;
+
+            const left = Math.max(Math.min(x1, x2), -width);
+            const right = Math.min(Math.max(x1, x2), width * 2);
+            if(right < 0 || left > width) return;
+
+            rendered.push({
+                left,
+                right,
+                y,
+                color: level.color || (level.kind === "present" ? "#111827" : "#64748b"),
+                width: level.width || (level.kind === "present" ? 3 : 2),
+                dashed: level.style === "dashed",
+                kind: level.kind || "previous"
+            });
+        });
+
+        const signature = rendered.map(item =>
+            `${Math.round(item.left)}:${Math.round(item.right)}:${Math.round(item.y)}:${item.kind}`
+        ).join("|");
+
+        if(!force && signature === this.lastVolumePocSignature) return;
+        this.lastVolumePocSignature = signature;
+
+        this.zoneLayer.querySelectorAll(".volumePocLine").forEach(node=>node.remove());
+        rendered.forEach(item=>{
+            const line = document.createElement("div");
+            line.className = `volumePocLine ${item.kind}`;
+            line.style.left = `${item.left}px`;
+            line.style.top = `${item.y}px`;
+            line.style.width = `${Math.max(item.right - item.left, 8)}px`;
+            line.style.borderTopColor = item.color;
+            line.style.borderTopWidth = `${item.width}px`;
+            line.style.borderTopStyle = item.dashed ? "dashed" : "solid";
+            this.zoneLayer.appendChild(line);
         });
 
     }
