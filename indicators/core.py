@@ -23,6 +23,131 @@ def vwap(df: pd.DataFrame) -> list[dict]:
     return _clean_line(values)
 
 
+def volume_poc_profile(df: pd.DataFrame, bins: int = 28, max_levels: int = 3) -> dict[str, list[dict]]:
+    clean = df[~df.index.duplicated(keep="last")].sort_index()
+    if clean.empty or "volume" not in clean:
+        return {"levels": []}
+
+    work = pd.DataFrame(
+        {
+            "high": pd.to_numeric(clean["high"], errors="coerce"),
+            "low": pd.to_numeric(clean["low"], errors="coerce"),
+            "volume": pd.to_numeric(clean["volume"], errors="coerce").fillna(0),
+        },
+        index=clean.index,
+    ).dropna(subset=["high", "low"])
+    work = work[work["volume"] > 0]
+    if work.empty:
+        return {"levels": []}
+
+    price_low = float(work["low"].min())
+    price_high = float(work["high"].max())
+    if not pd.notna(price_low) or not pd.notna(price_high):
+        return {"levels": []}
+    if price_high <= price_low:
+        start_time = int(work.index[0].timestamp())
+        end_time = int(work.index[-1].timestamp())
+        return {
+            "levels": [
+                _volume_poc_level("Present POC", price_low, start_time, end_time, "present"),
+            ]
+        }
+
+    bucket_count = max(8, min(int(bins or 28), 80))
+    bucket_size = (price_high - price_low) / bucket_count
+    profile = [0.0 for _ in range(bucket_count)]
+    segments: list[dict] = []
+    active_bucket: int | None = None
+    active_start = int(work.index[0].timestamp())
+    last_time = active_start
+    step_seconds = _infer_time_step_seconds(work.index)
+
+    for ts, row in work.iterrows():
+        low = float(row["low"])
+        high = float(row["high"])
+        volume = float(row["volume"])
+        start_bucket = max(0, min(bucket_count - 1, int((low - price_low) / bucket_size)))
+        end_bucket = max(0, min(bucket_count - 1, int((high - price_low) / bucket_size)))
+        if end_bucket < start_bucket:
+            start_bucket, end_bucket = end_bucket, start_bucket
+
+        share = volume / (end_bucket - start_bucket + 1)
+        for bucket in range(start_bucket, end_bucket + 1):
+            profile[bucket] += share
+
+        current_bucket = max(range(bucket_count), key=lambda bucket: profile[bucket])
+        current_time = int(ts.timestamp())
+        if active_bucket is None:
+            active_bucket = current_bucket
+            active_start = current_time
+        elif current_bucket != active_bucket:
+            segments.append(
+                {
+                    "bucket": active_bucket,
+                    "startTime": active_start,
+                    "endTime": current_time,
+                }
+            )
+            active_bucket = current_bucket
+            active_start = current_time
+        last_time = current_time
+
+    if active_bucket is not None:
+        segments.append(
+            {
+                "bucket": active_bucket,
+                "startTime": active_start,
+                "endTime": max(last_time + step_seconds, active_start + step_seconds),
+            }
+        )
+
+    recent = segments[-max(1, int(max_levels or 3)) :]
+    levels = []
+    previous_total = max(0, len(recent) - 1)
+    for index, segment in enumerate(recent):
+        price = price_low + ((segment["bucket"] + 0.5) * bucket_size)
+        is_present = index == len(recent) - 1
+        label = "Present POC" if is_present else f"Previous POC {previous_total - index}"
+        levels.append(
+            _volume_poc_level(
+                label,
+                price,
+                segment["startTime"],
+                segment["endTime"],
+                "present" if is_present else "previous",
+            )
+        )
+
+    return {"levels": levels}
+
+
+def _infer_time_step_seconds(index: pd.Index) -> int:
+    timestamps = [int(ts.timestamp()) for ts in index]
+    deltas = [
+        current - previous
+        for previous, current in zip(timestamps, timestamps[1:])
+        if current > previous
+    ]
+    if not deltas:
+        return 300
+    deltas.sort()
+    return max(60, int(deltas[len(deltas) // 2]))
+
+
+def _volume_poc_level(label: str, price: float, start_time: int, end_time: int, kind: str) -> dict:
+    return {
+        "label": label,
+        "price": float(price),
+        "startTime": int(start_time),
+        "endTime": int(end_time),
+        "labelTime": int(end_time),
+        "kind": kind,
+        "color": "#111827" if kind == "present" else "#64748b",
+        "width": 3 if kind == "present" else 2,
+        "style": "solid" if kind == "present" else "dashed",
+    }
+
+
 def cpr(df: pd.DataFrame, show_pivots: bool = True) -> dict[str, list[dict]]:
     clean = df[~df.index.duplicated(keep="last")].sort_index()
     if clean.empty:
