@@ -19,7 +19,17 @@ from api.historical import HistoricalData
 from api.option_chain import OptionChain
 from chart.chart import TradingChart
 from config import APP_NAME, FYERS, INDEX_CONFIG, TIMEFRAMES
-from indicators.core import angle_market, alphatrend, cpr, ema, fvg_ifvg_order_blocks, market_structure, volume_delta, vwap
+from indicators.core import (
+    angle_market,
+    alphatrend,
+    cpr,
+    ema,
+    fvg_ifvg_order_blocks,
+    market_structure,
+    volume_delta,
+    volume_poc_profile,
+    vwap,
+)
 
 st.set_page_config(page_title=APP_NAME, layout="wide")
 
@@ -27,7 +37,18 @@ APP_BUILD = "2026-08-03-candle-v5"
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 PREFERENCES_FILE = DATA_DIR / "last_activity.json"
-INDICATOR_OPTIONS = ["AlphaTrend", "EMA", "VWAP", "CPR", "Angle Market", "FVG", "iFVG", "Order Blocks", "PA Toolkit"]
+INDICATOR_OPTIONS = [
+    "AlphaTrend",
+    "EMA",
+    "VWAP",
+    "CPR",
+    "Volume POC Profile",
+    "Angle Market",
+    "FVG",
+    "iFVG",
+    "Order Blocks",
+    "PA Toolkit",
+]
 TOP_SPOT_QUOTES = {
     "CRUDEOIL": "MCX:CRUDEOIL26JULFUT",
     "BANKNIFTY": INDEX_CONFIG["BANKNIFTY"]["spot"],
@@ -705,6 +726,9 @@ ema_periods = [20]
 show_vwap = False
 show_cpr = False
 show_cpr_pivots = True
+show_volume_poc = False
+volume_poc_bins = 28
+volume_poc_levels = 3
 show_angle_market = False
 angle_market_length = 5
 angle_market_angle = 0.1
@@ -804,6 +828,7 @@ show_alphatrend = "AlphaTrend" in selected_indicators
 show_ema = "EMA" in selected_indicators
 show_vwap = "VWAP" in selected_indicators
 show_cpr = "CPR" in selected_indicators
+show_volume_poc = "Volume POC Profile" in selected_indicators
 show_angle_market = "Angle Market" in selected_indicators
 show_fvg = "FVG" in selected_indicators
 show_ifvg = "iFVG" in selected_indicators
@@ -823,6 +848,23 @@ if show_cpr:
         "Show R/S levels",
         value=bool(preferences.get("show_cpr_pivots", True)),
         key="cpr_pivots_main",
+    )
+if show_volume_poc:
+    volume_poc_cols = st.columns(2)
+    volume_poc_bins = volume_poc_cols[0].number_input(
+        "POC rows",
+        min_value=8,
+        max_value=80,
+        value=int(preference_number(preferences, "volume_poc_bins", 28)),
+        step=2,
+        key="volume_poc_bins_main",
+    )
+    volume_poc_levels = volume_poc_cols[1].number_input(
+        "POC marks",
+        min_value=1,
+        max_value=5,
+        value=int(preference_number(preferences, "volume_poc_levels", 3)),
+        key="volume_poc_levels_main",
     )
 if show_alphatrend:
     alpha_cols = st.columns(2)
@@ -905,6 +947,8 @@ save_preferences(
         "selected_indicators": list(selected_indicators),
         "ema_periods": [int(period) for period in ema_periods],
         "show_cpr_pivots": bool(show_cpr_pivots),
+        "volume_poc_bins": int(volume_poc_bins),
+        "volume_poc_levels": int(volume_poc_levels),
         "alphatrend_period": int(alphatrend_period),
         "alphatrend_coeff": float(alphatrend_coeff),
         "angle_market_length": int(angle_market_length),
@@ -1047,6 +1091,15 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
 
     display_df = latest_session_df(chart_df, chart_tf_label) if latest_session_only else chart_df
     overlays = trim_overlays(build_overlays(chart_df), display_df)
+    overlays["volume_poc"] = (
+        volume_poc_profile(
+            display_df,
+            bins=int(volume_poc_bins),
+            max_levels=int(volume_poc_levels),
+        )
+        if show_volume_poc
+        else None
+    )
     last_row = display_df.iloc[-1]
     delta = volume_delta(display_df.tail(80))
     latest_candle_time = display_df.index.max().strftime("%d %b %H:%M")
@@ -1061,6 +1114,7 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
         "emas": overlays["emas"],
         "vwap": overlays["vwap"],
         "cpr": overlays["cpr"],
+        "volume_poc": overlays["volume_poc"],
         "angle_market": overlays["angle_market"],
         "alphatrend": overlays["alphatrend"],
         "zones": overlays["zones"],
