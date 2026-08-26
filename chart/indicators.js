@@ -660,7 +660,7 @@ class IndicatorEngine {
             this.zoneLayer.appendChild(box);
 
         });
-        this.renderVolumePOC(false);
+        this.renderVolumePOC(true);
 
     }
 
