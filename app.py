@@ -1250,12 +1250,14 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
                 "price": float(pressure["pocPrice"]),
                 "label": f"VOLUME AREA: {dominant.upper()} PRESSURE{ratio_text}",
                 "tone": tone,
+                "placement": "topLeft",
                 "direction": "bullish" if dominant == "buying" else "bearish" if dominant == "selling" else "neutral",
             }
         )
     if spec["title"] == "Index":
         option_callout = option_volume_callout(chain_df, int(display_df.index[-1].timestamp()), float(last_row["close"]))
         if option_callout:
+            option_callout["placement"] = "topLeft"
             overlays["callouts"].append(option_callout)
     delta = volume_delta(display_df.tail(80))
     latest_candle_time = display_df.index.max().strftime("%d %b %H:%M")
