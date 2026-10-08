@@ -2,7 +2,7 @@
 
 import html
 import json
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -27,8 +27,10 @@ cpr = indicator_core.cpr
 ema = indicator_core.ema
 fvg_ifvg_order_blocks = indicator_core.fvg_ifvg_order_blocks
 market_structure = indicator_core.market_structure
+smart_money_callouts = indicator_core.smart_money_callouts
 volume_delta = indicator_core.volume_delta
 volume_poc_profile = getattr(indicator_core, "volume_poc_profile", lambda *args, **kwargs: {"levels": []})
+volume_area_pressure = getattr(indicator_core, "volume_area_pressure", lambda *args, **kwargs: {})
 vwap = indicator_core.vwap
 
 st.set_page_config(page_title=APP_NAME, layout="wide")
@@ -46,9 +48,15 @@ INDICATOR_OPTIONS = [
     "Angle Market",
     "FVG",
     "iFVG",
+    "CISD",
     "Order Blocks",
     "PA Toolkit",
 ]
+HTF_FVG_TIMEFRAMES = [
+    ("15 Min", "15", "15m"),
+    ("30 Min", "30", "30m"),
+]
+FVG_LOOKBACK_DAYS = 4
 TOP_SPOT_QUOTES = {
     "CRUDEOIL": "MCX:CRUDEOIL26JULFUT",
     "BANKNIFTY": INDEX_CONFIG["BANKNIFTY"]["spot"],
@@ -586,6 +594,32 @@ def total_oi_change_stats(chain_df: pd.DataFrame) -> dict[str, dict]:
     return stats
 
 
+def option_volume_callout(chain_df: pd.DataFrame, timestamp: int, price: float) -> dict | None:
+    if chain_df.empty or "volume" not in chain_df or "type" not in chain_df:
+        return None
+    totals = chain_df.groupby("type")["volume"].sum()
+    call_volume = float(totals.get("CE", 0) or 0)
+    put_volume = float(totals.get("PE", 0) or 0)
+    if call_volume <= 0 and put_volume <= 0:
+        return None
+    if put_volume > call_volume:
+        dominant, ratio, tone = "PUT", put_volume / call_volume if call_volume else None, "optionPut"
+    elif call_volume > put_volume:
+        dominant, ratio, tone = "CALL", call_volume / put_volume if put_volume else None, "optionCall"
+    else:
+        dominant, ratio, tone = "BALANCED", 1.0, "optionNeutral"
+    ratio_text = f"PE {ratio:.2f}x CE" if dominant == "PUT" and ratio is not None else (
+        f"CE {ratio:.2f}x PE" if dominant == "CALL" and ratio is not None else "BALANCED"
+    )
+    return {
+        "time": int(timestamp),
+        "price": float(price),
+        "label": f"OPTION VOLUME: {ratio_text} | PE {compact_number(put_volume)} / CE {compact_number(call_volume)}",
+        "tone": tone,
+        "direction": "bullish" if dominant == "PUT" else "bearish" if dominant == "CALL" else "neutral",
+    }
+
+
 def render_index_oi_summary(chain_df: pd.DataFrame) -> None:
     stats = total_oi_change_stats(chain_df)
     st.caption("Total OI Change")
@@ -738,6 +772,7 @@ alphatrend_period = 14
 alphatrend_coeff = 1.0
 show_fvg = False
 show_ifvg = False
+show_cisd = False
 show_ob = False
 show_structure = False
 structure_len = 9
@@ -832,6 +867,7 @@ show_volume_poc = "Volume POC Profile" in selected_indicators
 show_angle_market = "Angle Market" in selected_indicators
 show_fvg = "FVG" in selected_indicators
 show_ifvg = "iFVG" in selected_indicators
+show_cisd = "CISD" in selected_indicators
 show_ob = "Order Blocks" in selected_indicators
 show_structure = "PA Toolkit" in selected_indicators
 
@@ -969,9 +1005,19 @@ def build_overlays(df: pd.DataFrame) -> dict:
         visible_kinds.add("ifvg")
     if show_ob:
         visible_kinds.add("ob")
+    if show_cisd:
+        visible_kinds.add("fvg")
 
     all_zones = fvg_ifvg_order_blocks(df) if visible_kinds else []
-    zones = [zone for zone in all_zones if zone.get("kind") in visible_kinds]
+    confluence_zones = all_zones if all_zones else fvg_ifvg_order_blocks(df)
+    zones = [
+        zone for zone in all_zones
+        if zone.get("kind") in visible_kinds and (show_fvg or zone.get("kind") != "fvg")
+    ]
+    cisd = [
+        zone["cisd"] for zone in all_zones
+        if show_cisd and zone.get("cisd")
+    ]
     return {
         "emas": [{"period": period, "data": ema(df, period)} for period in ema_periods] if show_ema else [],
         "vwap": vwap(df) if show_vwap else None,
@@ -992,6 +1038,8 @@ def build_overlays(df: pd.DataFrame) -> dict:
         if show_alphatrend
         else None,
         "zones": zones,
+        "cisd": cisd,
+        "callouts": smart_money_callouts(df, confluence_zones),
         "structure": market_structure(
             df,
             lookback=int(structure_len),
@@ -1001,6 +1049,56 @@ def build_overlays(df: pd.DataFrame) -> dict:
         if show_structure
         else None,
     }
+
+
+def higher_timeframe_fvg_zones(symbol: str, current_resolution: str, nonce: int) -> list[dict]:
+    if not show_fvg:
+        return []
+
+    zones: list[dict] = []
+    for label, resolution, short_label in HTF_FVG_TIMEFRAMES:
+        if resolution == current_resolution:
+            continue
+        try:
+            htf_df = load_candles(client, symbol, resolution, max(days, FVG_LOOKBACK_DAYS), nonce)
+        except Exception:
+            continue
+        if htf_df.empty:
+            continue
+        htf_zones = [zone for zone in fvg_ifvg_order_blocks(htf_df) if zone.get("kind") == "fvg"]
+        for zone in htf_zones:
+            direction = zone.get("direction")
+            zones.append(
+                {
+                    **zone,
+                    "label": f"{short_label} FVG - {'BULL' if direction == 'bullish' else 'BEAR'}",
+                    "fill": "rgba(34,197,94,0.12)" if direction == "bullish" else "rgba(239,68,68,0.12)",
+                    "border": "rgba(22,163,74,0.82)" if direction == "bullish" else "rgba(220,38,38,0.82)",
+                    "text": "rgba(22,163,74,0.98)" if direction == "bullish" else "rgba(220,38,38,0.98)",
+                    "borderStyle": "solid" if resolution == "30" else "dashed",
+                    "sourceTf": short_label,
+                }
+            )
+    return zones
+
+
+def keep_recent_fvg_zones_alive(zones: list[dict], chart_df: pd.DataFrame, chart_resolution: str) -> list[dict]:
+    if not show_fvg or chart_df.empty or chart_resolution == "D":
+        return zones
+
+    last_ts = int(chart_df.index.max().timestamp())
+    cutoff_ts = int((chart_df.index.max() - timedelta(days=FVG_LOOKBACK_DAYS)).timestamp())
+    extend_to = last_ts + max(timeframe_seconds(chart_resolution), 300)
+    active_zones = []
+    for zone in zones:
+        if zone.get("kind") != "fvg":
+            active_zones.append(zone)
+            continue
+        start_time = int(zone.get("startTime") or zone.get("time") or 0)
+        if start_time < cutoff_ts:
+            continue
+        active_zones.append({**zone, "endTime": max(int(zone.get("endTime") or start_time), extend_to)})
+    return active_zones
 
 
 def latest_session_df(df: pd.DataFrame, chart_tf_label: str) -> pd.DataFrame:
@@ -1047,6 +1145,10 @@ def trim_overlays(overlays: dict, df: pd.DataFrame) -> dict:
         }
     if overlays.get("zones"):
         trimmed["zones"] = [item for item in overlays["zones"] if line_touches_session(item)]
+    if overlays.get("cisd"):
+        trimmed["cisd"] = [item for item in overlays["cisd"] if point_in_session(item)]
+    if overlays.get("callouts"):
+        trimmed["callouts"] = [item for item in overlays["callouts"] if point_in_session(item)]
     if overlays.get("structure"):
         trimmed["structure"] = {
             "markers": [item for item in overlays["structure"].get("markers", []) if point_in_session(item)],
@@ -1066,8 +1168,10 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
     if st.button(f"Refresh {spec['title']}", key=f"refresh_button:{chart_id}"):
         st.session_state[nonce_key] += 1
 
+    chart_resolution = TIMEFRAMES[chart_tf_label]
+    candle_days = max(days, FVG_LOOKBACK_DAYS) if chart_resolution != "D" else days
     try:
-        chart_df = load_candles(client, spec["symbol"], TIMEFRAMES[chart_tf_label], days, st.session_state[nonce_key])
+        chart_df = load_candles(client, spec["symbol"], chart_resolution, candle_days, st.session_state[nonce_key])
     except Exception as exc:
         st.error(f"{spec['label']} candles failed [{APP_BUILD}]: {exc}")
         return None, None
@@ -1076,7 +1180,6 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
         st.warning(f"{spec['label']} returned no candles.")
         return None, None
 
-    chart_resolution = TIMEFRAMES[chart_tf_label]
     if latest_session_only and chart_resolution != "D":
         today_ist = datetime.now(ZoneInfo("Asia/Kolkata")).date()
         latest_available = chart_df.index.max()
@@ -1090,7 +1193,14 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
             return None, None
 
     display_df = latest_session_df(chart_df, chart_tf_label) if latest_session_only else chart_df
-    overlays = trim_overlays(build_overlays(chart_df), display_df)
+    raw_overlays = build_overlays(chart_df)
+    if show_fvg and chart_resolution != "D":
+        raw_overlays["zones"] = [
+            *raw_overlays.get("zones", []),
+            *higher_timeframe_fvg_zones(spec["symbol"], chart_resolution, st.session_state[nonce_key]),
+        ]
+        raw_overlays["zones"] = keep_recent_fvg_zones_alive(raw_overlays["zones"], chart_df, chart_resolution)
+    overlays = trim_overlays(raw_overlays, display_df)
     overlays["volume_poc"] = (
         volume_poc_profile(
             display_df,
@@ -1101,6 +1211,25 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
         else None
     )
     last_row = display_df.iloc[-1]
+    pressure = volume_area_pressure(display_df, bins=int(volume_poc_bins))
+    if pressure.get("pocPrice") is not None:
+        dominant = pressure.get("dominant", "neutral")
+        ratio = pressure.get("ratio")
+        ratio_text = f" {ratio:.2f}x" if ratio is not None else ""
+        tone = "pressureBuy" if dominant == "buying" else "pressureSell" if dominant == "selling" else "pressureNeutral"
+        overlays["callouts"].append(
+            {
+                "time": int(display_df.index[-1].timestamp()),
+                "price": float(pressure["pocPrice"]),
+                "label": f"VOLUME AREA: {dominant.upper()} PRESSURE{ratio_text}",
+                "tone": tone,
+                "direction": "bullish" if dominant == "buying" else "bearish" if dominant == "selling" else "neutral",
+            }
+        )
+    if spec["title"] == "Index":
+        option_callout = option_volume_callout(chain_df, int(display_df.index[-1].timestamp()), float(last_row["close"]))
+        if option_callout:
+            overlays["callouts"].append(option_callout)
     delta = volume_delta(display_df.tail(80))
     latest_candle_time = display_df.index.max().strftime("%d %b %H:%M")
     st.caption(
@@ -1118,6 +1247,8 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
         "angle_market": overlays["angle_market"],
         "alphatrend": overlays["alphatrend"],
         "zones": overlays["zones"],
+        "cisd": overlays["cisd"],
+        "callouts": overlays["callouts"],
         "structure": overlays["structure"],
         "symbol": spec["label"],
         "timeframe": chart_tf_label,
