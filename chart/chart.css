@@ -155,6 +155,58 @@ html,body{
     color:#ef4444;
 }
 
+.indicatorLabel.cisd{
+    background:#0f172a;
+    border:1px solid #f59e0b;
+    color:#fbbf24;
+    transform:translate(-50%,90%);
+    font-size:11px;
+}
+
+.indicatorLabel.cisd.bear{
+    transform:translate(-50%,-120%);
+}
+
+.indicatorLabel.callout{
+    z-index:10;
+    font-size:12px;
+    font-weight:900;
+    letter-spacing:.04em;
+    border:2px solid currentColor;
+}
+
+.indicatorLabel.callout.buy{
+    background:#065f46;
+    color:#a7f3d0;
+    transform:translate(-50%,90%);
+}
+
+.indicatorLabel.callout.sell{
+    background:#991b1b;
+    color:#fecaca;
+    transform:translate(-50%,-120%);
+}
+
+.indicatorLabel.callout.pressureBuy,
+.indicatorLabel.callout.optionPut{
+    background:#065f46;
+    color:#a7f3d0;
+    transform:translate(-50%,90%);
+}
+
+.indicatorLabel.callout.pressureSell,
+.indicatorLabel.callout.optionCall{
+    background:#991b1b;
+    color:#fecaca;
+    transform:translate(-50%,-120%);
+}
+
+.indicatorLabel.callout.pressureNeutral,
+.indicatorLabel.callout.optionNeutral{
+    background:#334155;
+    color:#e2e8f0;
+}
+
 .indicatorLabel.angle{
     background:transparent;
     box-shadow:none;

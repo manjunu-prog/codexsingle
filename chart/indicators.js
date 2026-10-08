@@ -443,6 +443,28 @@ class IndicatorEngine {
 
     }
 
+    setCISD(signals){
+
+        this.setLabels("cisd", (signals || []).map(signal=>({
+            time: signal.time,
+            price: signal.price,
+            text: signal.label || (signal.direction === "bullish" ? "CISD BULL" : "CISD BEAR"),
+            tone: signal.direction === "bullish" ? "bull" : "bear"
+        })));
+
+    }
+
+    setCallouts(callouts){
+
+        this.setLabels("callout", (callouts || []).map(callout=>({
+            time: callout.time,
+            price: callout.price,
+            text: callout.label,
+            tone: callout.tone || (callout.direction === "bullish" ? "buy" : "sell")
+        })));
+
+    }
+
     setZones(zones){
 
         this.zones = (zones || []).filter(zone =>

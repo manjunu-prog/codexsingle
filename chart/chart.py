@@ -28,6 +28,8 @@ class TradingChart:
         angle_market=None,
         alphatrend=None,
         fvg=None,
+        cisd=None,
+        callouts=None,
         zones=None,
         structure=None,
         symbol="",
@@ -67,6 +69,8 @@ window.addEventListener("load", function(){{
         {f'window.Indicators.setAngleMarket({json.dumps(angle_market)});' if angle_market else ''}
         {f'window.Indicators.setAlphaTrend({json.dumps(alphatrend)});' if alphatrend else ''}
         {f'window.Indicators.setFVG({json.dumps(fvg)});' if fvg else ''}
+        {f'window.Indicators.setCISD({json.dumps(cisd)});' if cisd else 'window.Indicators.setCISD([]);'}
+        {f'window.Indicators.setCallouts({json.dumps(callouts)});' if callouts else 'window.Indicators.setCallouts([]);'}
         {f'window.Indicators.setZones({json.dumps(zones)});' if zones else ''}
         {f'window.Indicators.setStructure({json.dumps(structure)});' if structure else ''}
         if(window.ChartEngine && window.ChartEngine.preserveView){{
