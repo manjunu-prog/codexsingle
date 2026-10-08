@@ -1008,8 +1008,8 @@ def build_overlays(df: pd.DataFrame) -> dict:
     if show_cisd:
         visible_kinds.add("fvg")
 
-    all_zones = fvg_ifvg_order_blocks(df) if visible_kinds else []
-    confluence_zones = all_zones if all_zones else fvg_ifvg_order_blocks(df)
+    all_zones = fvg_ifvg_order_blocks(df, max_zones=90) if visible_kinds else []
+    confluence_zones = all_zones if all_zones else fvg_ifvg_order_blocks(df, max_zones=90)
     zones = [
         zone for zone in all_zones
         if zone.get("kind") in visible_kinds and (show_fvg or zone.get("kind") != "fvg")
@@ -1065,7 +1065,7 @@ def higher_timeframe_fvg_zones(symbol: str, current_resolution: str, nonce: int)
             continue
         if htf_df.empty:
             continue
-        htf_zones = [zone for zone in fvg_ifvg_order_blocks(htf_df) if zone.get("kind") == "fvg"]
+        htf_zones = [zone for zone in fvg_ifvg_order_blocks(htf_df, max_zones=45) if zone.get("kind") == "fvg"]
         for zone in htf_zones:
             direction = zone.get("direction")
             zones.append(
@@ -1099,6 +1099,32 @@ def keep_recent_fvg_zones_alive(zones: list[dict], chart_df: pd.DataFrame, chart
             continue
         active_zones.append({**zone, "endTime": max(int(zone.get("endTime") or start_time), extend_to)})
     return active_zones
+
+
+def compact_chart_zones(zones: list[dict]) -> list[dict]:
+    """Keep the newest useful overlays so the browser does not build hundreds of DOM nodes."""
+    limits = {"local": 36, "15m": 18, "30m": 18}
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    passthrough: list[dict] = []
+    for zone in zones:
+        kind = str(zone.get("kind") or "")
+        if kind not in {"fvg", "ifvg"}:
+            passthrough.append(zone)
+            continue
+        source = str(zone.get("sourceTf") or "local")
+        grouped.setdefault((source, kind), []).append(zone)
+
+    selected_ids: set[int] = set()
+    for (source, kind), items in grouped.items():
+        limit = limits.get(source, 24)
+        if kind == "ifvg":
+            limit = min(limit, 24)
+        selected_ids.update(id(item) for item in items[-limit:])
+
+    return [
+        zone for zone in zones
+        if id(zone) in selected_ids or str(zone.get("kind") or "") not in {"fvg", "ifvg"}
+    ]
 
 
 def latest_session_df(df: pd.DataFrame, chart_tf_label: str) -> pd.DataFrame:
@@ -1200,6 +1226,7 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
             *higher_timeframe_fvg_zones(spec["symbol"], chart_resolution, st.session_state[nonce_key]),
         ]
         raw_overlays["zones"] = keep_recent_fvg_zones_alive(raw_overlays["zones"], chart_df, chart_resolution)
+    raw_overlays["zones"] = compact_chart_zones(raw_overlays.get("zones", []))
     overlays = trim_overlays(raw_overlays, display_df)
     overlays["volume_poc"] = (
         volume_poc_profile(
