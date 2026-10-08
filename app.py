@@ -731,23 +731,22 @@ def option_volume_callout(chain_df: pd.DataFrame, timestamp: int, price: float) 
     }
 
 
-def option_chart_pressure(chain_df: pd.DataFrame, side: str) -> dict | None:
+def option_chart_pressure(chain_df: pd.DataFrame, side: str, strike: int | None = None) -> dict | None:
     """Compare total PE/CE volume for the selected option chart."""
     if chain_df.empty or not {"type", "volume"}.issubset(chain_df.columns) or side not in {"CE", "PE"}:
         return None
-    totals = chain_df.groupby("type")["volume"].sum()
+    work = chain_df[chain_df["strike"] == strike] if strike is not None and "strike" in chain_df.columns else chain_df
+    totals = work.groupby("type")["volume"].sum()
     ce_volume = float(totals.get("CE", 0) or 0)
     pe_volume = float(totals.get("PE", 0) or 0)
     if ce_volume <= 0 and pe_volume <= 0:
         return None
 
-    if side == "CE":
-        selling = pe_volume > ce_volume
-        leading, trailing = (pe_volume, ce_volume) if selling else (ce_volume, pe_volume)
-    else:
-        buying = ce_volume > pe_volume
-        leading, trailing = (ce_volume, pe_volume) if buying else (pe_volume, ce_volume)
-        selling = not buying and pe_volume > ce_volume
+    own_volume = ce_volume if side == "CE" else pe_volume
+    other_volume = pe_volume if side == "CE" else ce_volume
+    buying = own_volume > other_volume
+    selling = own_volume < other_volume
+    leading, trailing = (own_volume, other_volume) if buying else (other_volume, own_volume)
 
     if leading == trailing:
         return {
@@ -1369,7 +1368,7 @@ def trim_overlays(overlays: dict, df: pd.DataFrame) -> dict:
     return trimmed
 
 
-def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, dict] | tuple[None, None]:
+def render_market_chart(spec: dict, height: int = 520, strike: int | None = None) -> tuple[pd.DataFrame, dict] | tuple[None, None]:
     chart_id = spec.get("chart_id", spec["label"])
     chart_tf_label = spec.get("tf_label", index_tf_label)
     nonce_key = f"refresh_nonce:{chart_id}"
@@ -1444,7 +1443,7 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
             option_callout["placement"] = "topLeft"
             overlays["callouts"].append(option_callout)
     elif pressure.get("pocPrice") is not None:
-        option_pressure = option_chart_pressure(chain_df, spec["title"])
+        option_pressure = option_chart_pressure(chain_df, spec["title"], strike=strike)
         if option_pressure:
             overlays["callouts"].append(
                 {
@@ -1505,4 +1504,4 @@ for spec, strike in [(ce_chart_spec, selected_ce_strike), (pe_chart_spec, select
         continue
     st.subheader(spec["title"])
     render_strike_oi_summary(chain_df, strike)
-    render_market_chart(spec, height=760)
+    render_market_chart(spec, height=760, strike=strike)
