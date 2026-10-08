@@ -731,6 +731,41 @@ def option_volume_callout(chain_df: pd.DataFrame, timestamp: int, price: float) 
     }
 
 
+def option_chart_pressure(chain_df: pd.DataFrame, side: str) -> dict | None:
+    """Compare total PE/CE volume for the selected option chart."""
+    if chain_df.empty or not {"type", "volume"}.issubset(chain_df.columns) or side not in {"CE", "PE"}:
+        return None
+    totals = chain_df.groupby("type")["volume"].sum()
+    ce_volume = float(totals.get("CE", 0) or 0)
+    pe_volume = float(totals.get("PE", 0) or 0)
+    if ce_volume <= 0 and pe_volume <= 0:
+        return None
+
+    if side == "CE":
+        selling = pe_volume > ce_volume
+        leading, trailing = (pe_volume, ce_volume) if selling else (ce_volume, pe_volume)
+    else:
+        buying = ce_volume > pe_volume
+        leading, trailing = (ce_volume, pe_volume) if buying else (pe_volume, ce_volume)
+        selling = not buying and pe_volume > ce_volume
+
+    if leading == trailing:
+        return {
+            "label": "OPTION PRESSURE: BALANCED",
+            "tone": "pressureNeutral",
+            "direction": "neutral",
+        }
+
+    pressure = "SELLING" if selling else "BUYING"
+    ratio = leading / trailing if trailing else None
+    ratio_text = f"{ratio:.2f}x" if ratio is not None else "∞"
+    return {
+        "label": f"OPTION PRESSURE: {pressure} {ratio_text}",
+        "tone": "pressureSell" if pressure == "SELLING" else "pressureBuy",
+        "direction": "bearish" if pressure == "SELLING" else "bullish",
+    }
+
+
 def render_index_oi_summary(chain_df: pd.DataFrame) -> None:
     stats = total_oi_change_stats(chain_df)
     st.caption("Total OI Change")
@@ -1388,7 +1423,7 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
     )
     last_row = display_df.iloc[-1]
     pressure = volume_area_pressure(display_df, bins=int(volume_poc_bins))
-    if pressure.get("pocPrice") is not None:
+    if pressure.get("pocPrice") is not None and spec["title"] == "Index":
         dominant = pressure.get("dominant", "neutral")
         ratio = pressure.get("ratio")
         ratio_text = f" {ratio:.2f}x" if ratio is not None else ""
@@ -1408,6 +1443,17 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
         if option_callout:
             option_callout["placement"] = "topLeft"
             overlays["callouts"].append(option_callout)
+    elif pressure.get("pocPrice") is not None:
+        option_pressure = option_chart_pressure(chain_df, spec["title"])
+        if option_pressure:
+            overlays["callouts"].append(
+                {
+                    **option_pressure,
+                    "time": int(display_df.index[-1].timestamp()),
+                    "price": float(pressure["pocPrice"]),
+                    "placement": "topLeft",
+                }
+            )
     delta = volume_delta(display_df.tail(80))
     latest_candle_time = display_df.index.max().strftime("%d %b %H:%M")
     st.caption(
