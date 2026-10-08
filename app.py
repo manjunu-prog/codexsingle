@@ -135,12 +135,31 @@ def save_option_flow_history(symbol: str, rows: list[dict]) -> None:
 def option_flow_history_snapshot(chain_df: pd.DataFrame) -> dict | None:
     if chain_df.empty or not {"type", "volume", "oi"}.issubset(chain_df.columns):
         return None
-    grouped = chain_df.groupby("type")[["volume", "oi"]].sum()
+    work = chain_df.copy()
+    if "oi_change" not in work.columns:
+        work["oi_change"] = 0.0
+    grouped = work.groupby("type")[["volume", "oi", "oi_change"]].sum()
+
+    def side_values(side: str) -> tuple[float, float, float, float | None]:
+        if side not in grouped.index:
+            return 0.0, 0.0, 0.0, None
+        oi = float(grouped.loc[side, "oi"])
+        oi_change = float(grouped.loc[side, "oi_change"])
+        previous_oi = oi - oi_change
+        oi_change_pct = (oi_change / previous_oi) * 100 if previous_oi else None
+        return float(grouped.loc[side, "volume"]), oi, oi_change, oi_change_pct
+
+    pe_volume, pe_oi, pe_oi_change, pe_oi_change_pct = side_values("PE")
+    ce_volume, ce_oi, ce_oi_change, ce_oi_change_pct = side_values("CE")
     return {
-        "pe_volume": float(grouped.loc["PE", "volume"]) if "PE" in grouped.index else 0.0,
-        "ce_volume": float(grouped.loc["CE", "volume"]) if "CE" in grouped.index else 0.0,
-        "pe_oi": float(grouped.loc["PE", "oi"]) if "PE" in grouped.index else 0.0,
-        "ce_oi": float(grouped.loc["CE", "oi"]) if "CE" in grouped.index else 0.0,
+        "pe_volume": pe_volume,
+        "ce_volume": ce_volume,
+        "pe_oi": pe_oi,
+        "ce_oi": ce_oi,
+        "pe_oi_change_abs": pe_oi_change,
+        "ce_oi_change_abs": ce_oi_change,
+        "pe_oi_change_pct": pe_oi_change_pct,
+        "ce_oi_change_pct": ce_oi_change_pct,
     }
 
 
@@ -153,8 +172,14 @@ def record_option_flow_snapshot(symbol: str, chain_df: pd.DataFrame) -> list[dic
         return rows
 
     previous = rows[-1] if rows else None
-    signature = tuple(snapshot[key] for key in ("pe_volume", "ce_volume", "pe_oi", "ce_oi"))
-    previous_signature = tuple(previous.get(key) for key in ("pe_volume", "ce_volume", "pe_oi", "ce_oi")) if previous else None
+    signature = tuple(snapshot[key] for key in (
+        "pe_volume", "ce_volume", "pe_oi", "ce_oi",
+        "pe_oi_change_abs", "ce_oi_change_abs", "pe_oi_change_pct", "ce_oi_change_pct",
+    ))
+    previous_signature = tuple(previous.get(key) for key in (
+        "pe_volume", "ce_volume", "pe_oi", "ce_oi",
+        "pe_oi_change_abs", "ce_oi_change_abs", "pe_oi_change_pct", "ce_oi_change_pct",
+    )) if previous else None
     if signature == previous_signature:
         return rows
 
@@ -164,8 +189,6 @@ def record_option_flow_snapshot(symbol: str, chain_df: pd.DataFrame) -> list[dic
         **snapshot,
         "pe_volume_change": snapshot["pe_volume"] - previous["pe_volume"] if previous else None,
         "ce_volume_change": snapshot["ce_volume"] - previous["ce_volume"] if previous else None,
-        "pe_oi_change": snapshot["pe_oi"] - previous["pe_oi"] if previous else None,
-        "ce_oi_change": snapshot["ce_oi"] - previous["ce_oi"] if previous else None,
     }
     rows.append(row)
     save_option_flow_history(symbol, rows)
@@ -175,7 +198,7 @@ def record_option_flow_snapshot(symbol: str, chain_df: pd.DataFrame) -> list[dic
 def option_flow_history_display(rows: list[dict]) -> pd.DataFrame:
     columns = [
         "Time", "PE Vol", "PE Vol Δ", "CE Vol", "CE Vol Δ",
-        "PE OI", "PE OI Δ", "CE OI", "CE OI Δ",
+        "PE OI Chg %", "PE OI Chg", "CE OI Chg %", "CE OI Chg",
     ]
     display_rows = []
     for row in rows:
@@ -186,10 +209,10 @@ def option_flow_history_display(rows: list[dict]) -> pd.DataFrame:
                 "PE Vol Δ": compact_number(row["pe_volume_change"]),
                 "CE Vol": compact_number(row["ce_volume"]),
                 "CE Vol Δ": compact_number(row["ce_volume_change"]),
-                "PE OI": compact_number(row["pe_oi"]),
-                "PE OI Δ": compact_number(row["pe_oi_change"]),
-                "CE OI": compact_number(row["ce_oi"]),
-                "CE OI Δ": compact_number(row["ce_oi_change"]),
+                "PE OI Chg %": percent_text(row.get("pe_oi_change_pct")),
+                "PE OI Chg": compact_number(row.get("pe_oi_change_abs")),
+                "CE OI Chg %": percent_text(row.get("ce_oi_change_pct")),
+                "CE OI Chg": compact_number(row.get("ce_oi_change_abs")),
             }
         )
     return pd.DataFrame(display_rows, columns=columns)
@@ -736,7 +759,7 @@ def render_strike_oi_summary(chain_df: pd.DataFrame, strike: int | None) -> None
 
 def render_option_flow_history(symbol: str, index_name: str, rows: list[dict]) -> None:
     st.subheader("Option Flow History")
-    st.caption("One row is recorded when the selected index option-chain totals change during the session.")
+    st.caption("Volume deltas compare with the previous snapshot; OI change uses the option-chain API percentage and absolute change.")
     display_df = option_flow_history_display(rows)
     if display_df.empty:
         st.info("Waiting for the first option-chain snapshot.")
@@ -1427,6 +1450,7 @@ metric_cols[3].metric(
 
 st.subheader(index_chart_spec["title"])
 render_index_oi_summary(chain_df)
+render_option_flow_history(spot_symbol, index_name, option_flow_history)
 render_market_chart(index_chart_spec, height=760)
 
 for spec, strike in [(ce_chart_spec, selected_ce_strike), (pe_chart_spec, selected_pe_strike)]:
@@ -1436,7 +1460,3 @@ for spec, strike in [(ce_chart_spec, selected_ce_strike), (pe_chart_spec, select
     st.subheader(spec["title"])
     render_strike_oi_summary(chain_df, strike)
     render_market_chart(spec, height=760)
-
-render_option_flow_history(spot_symbol, index_name, option_flow_history)
-render_market_snapshot()
-render_market_heatmap()
