@@ -39,6 +39,7 @@ APP_BUILD = "2026-08-03-candle-v5"
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 PREFERENCES_FILE = DATA_DIR / "last_activity.json"
+OPTION_FLOW_HISTORY_FILE = DATA_DIR / "option_flow_history.json"
 INDICATOR_OPTIONS = [
     "AlphaTrend",
     "EMA",
@@ -105,6 +106,93 @@ def save_preferences(values: dict) -> None:
         PREFERENCES_FILE.write_text(json.dumps(values, indent=2, sort_keys=True))
     except Exception:
         pass
+
+
+def load_option_flow_history(symbol: str, session_date: str) -> list[dict]:
+    try:
+        if not OPTION_FLOW_HISTORY_FILE.exists():
+            return []
+        payload = json.loads(OPTION_FLOW_HISTORY_FILE.read_text())
+        rows = payload.get(symbol, []) if isinstance(payload, dict) else []
+        return [row for row in rows if row.get("date") == session_date][-500:]
+    except Exception:
+        return []
+
+
+def save_option_flow_history(symbol: str, rows: list[dict]) -> None:
+    try:
+        payload = {}
+        if OPTION_FLOW_HISTORY_FILE.exists():
+            loaded = json.loads(OPTION_FLOW_HISTORY_FILE.read_text())
+            if isinstance(loaded, dict):
+                payload = loaded
+        payload[symbol] = rows[-500:]
+        OPTION_FLOW_HISTORY_FILE.write_text(json.dumps(payload, indent=2))
+    except Exception:
+        pass
+
+
+def option_flow_history_snapshot(chain_df: pd.DataFrame) -> dict | None:
+    if chain_df.empty or not {"type", "volume", "oi"}.issubset(chain_df.columns):
+        return None
+    grouped = chain_df.groupby("type")[["volume", "oi"]].sum()
+    return {
+        "pe_volume": float(grouped.loc["PE", "volume"]) if "PE" in grouped.index else 0.0,
+        "ce_volume": float(grouped.loc["CE", "volume"]) if "CE" in grouped.index else 0.0,
+        "pe_oi": float(grouped.loc["PE", "oi"]) if "PE" in grouped.index else 0.0,
+        "ce_oi": float(grouped.loc["CE", "oi"]) if "CE" in grouped.index else 0.0,
+    }
+
+
+def record_option_flow_snapshot(symbol: str, chain_df: pd.DataFrame) -> list[dict]:
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    session_date = now.date().isoformat()
+    rows = load_option_flow_history(symbol, session_date)
+    snapshot = option_flow_history_snapshot(chain_df)
+    if snapshot is None:
+        return rows
+
+    previous = rows[-1] if rows else None
+    signature = tuple(snapshot[key] for key in ("pe_volume", "ce_volume", "pe_oi", "ce_oi"))
+    previous_signature = tuple(previous.get(key) for key in ("pe_volume", "ce_volume", "pe_oi", "ce_oi")) if previous else None
+    if signature == previous_signature:
+        return rows
+
+    row = {
+        "date": session_date,
+        "time": now.strftime("%H:%M:%S"),
+        **snapshot,
+        "pe_volume_change": snapshot["pe_volume"] - previous["pe_volume"] if previous else None,
+        "ce_volume_change": snapshot["ce_volume"] - previous["ce_volume"] if previous else None,
+        "pe_oi_change": snapshot["pe_oi"] - previous["pe_oi"] if previous else None,
+        "ce_oi_change": snapshot["ce_oi"] - previous["ce_oi"] if previous else None,
+    }
+    rows.append(row)
+    save_option_flow_history(symbol, rows)
+    return rows
+
+
+def option_flow_history_display(rows: list[dict]) -> pd.DataFrame:
+    columns = [
+        "Time", "PE Vol", "PE Vol Δ", "CE Vol", "CE Vol Δ",
+        "PE OI", "PE OI Δ", "CE OI", "CE OI Δ",
+    ]
+    display_rows = []
+    for row in rows:
+        display_rows.append(
+            {
+                "Time": row["time"],
+                "PE Vol": compact_number(row["pe_volume"]),
+                "PE Vol Δ": compact_number(row["pe_volume_change"]),
+                "CE Vol": compact_number(row["ce_volume"]),
+                "CE Vol Δ": compact_number(row["ce_volume_change"]),
+                "PE OI": compact_number(row["pe_oi"]),
+                "PE OI Δ": compact_number(row["pe_oi_change"]),
+                "CE OI": compact_number(row["ce_oi"]),
+                "CE OI Δ": compact_number(row["ce_oi_change"]),
+            }
+        )
+    return pd.DataFrame(display_rows, columns=columns)
 
 
 def option_index(options: list, value, default: int = 0) -> int:
@@ -646,6 +734,42 @@ def render_strike_oi_summary(chain_df: pd.DataFrame, strike: int | None) -> None
         )
 
 
+def render_option_flow_history(symbol: str, index_name: str, rows: list[dict]) -> None:
+    st.subheader("Option Flow History")
+    st.caption("One row is recorded when the selected index option-chain totals change during the session.")
+    display_df = option_flow_history_display(rows)
+    if display_df.empty:
+        st.info("Waiting for the first option-chain snapshot.")
+        return
+
+    st.dataframe(display_df, hide_index=True, width="stretch")
+    csv_data = pd.DataFrame(rows).to_csv(index=False).encode("utf-8")
+    download_col, telegram_col = st.columns(2)
+    download_col.download_button(
+        "Export Option Flow CSV",
+        data=csv_data,
+        file_name=f"{index_name.lower()}_option_flow.csv",
+        mime="text/csv",
+        key="export_option_flow_csv",
+        width="stretch",
+    )
+    notifier = get_notifier()
+    if telegram_col.button(
+        "Send CSV to Telegram",
+        key="send_option_flow_csv",
+        disabled=not notifier.enabled,
+        width="stretch",
+    ):
+        ok, message = notifier.send_document(
+            f"{index_name.lower()}_option_flow.csv",
+            csv_data,
+            caption=f"{index_name} option flow history",
+        )
+        (st.success if ok else st.error)(message)
+    if not notifier.enabled:
+        st.caption("Configure Telegram bot recipients to enable CSV delivery.")
+
+
 with st.sidebar:
     st.header("Market")
     index_options = list(INDEX_CONFIG.keys())
@@ -737,6 +861,8 @@ try:
 except Exception as exc:
     st.error(f"Option-chain fetch failed: {exc}")
     chain_df = pd.DataFrame()
+
+option_flow_history = record_option_flow_snapshot(spot_symbol, chain_df)
 
 atm = None
 spot_ltp = None
@@ -1311,5 +1437,6 @@ for spec, strike in [(ce_chart_spec, selected_ce_strike), (pe_chart_spec, select
     render_strike_oi_summary(chain_df, strike)
     render_market_chart(spec, height=760)
 
+render_option_flow_history(spot_symbol, index_name, option_flow_history)
 render_market_snapshot()
 render_market_heatmap()
