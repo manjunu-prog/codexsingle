@@ -662,6 +662,9 @@ class IndicatorEngine {
             const width = Math.max(right - left, 6);
             const height = Math.max(bottom - top, 4);
 
+            const chartWidth = this.chartEngine.container.clientWidth || 1;
+            if(right < -48 || left > chartWidth + 48) return;
+
             renderedZones.push({zone, left, top, width, height});
 
         });
