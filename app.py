@@ -1387,10 +1387,15 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
         else None
     )
     last_row = display_df.iloc[-1]
+    delta = volume_delta(display_df.tail(80))
     pressure = volume_area_pressure(display_df, bins=int(volume_poc_bins))
     if pressure.get("pocPrice") is not None:
-        dominant = pressure.get("dominant", "neutral")
-        ratio = pressure.get("ratio")
+        buy_volume = float(delta.get("buy_volume", 0.0))
+        sell_volume = float(delta.get("sell_volume", 0.0))
+        dominant = "buying" if buy_volume > sell_volume else "selling" if sell_volume > buy_volume else "neutral"
+        leading = max(buy_volume, sell_volume)
+        trailing = min(buy_volume, sell_volume)
+        ratio = leading / trailing if trailing else None
         ratio_text = f" {ratio:.2f}x" if ratio is not None else ""
         tone = "pressureBuy" if dominant == "buying" else "pressureSell" if dominant == "selling" else "pressureNeutral"
         overlays["callouts"].append(
@@ -1408,7 +1413,6 @@ def render_market_chart(spec: dict, height: int = 520) -> tuple[pd.DataFrame, di
         if option_callout:
             option_callout["placement"] = "topLeft"
             overlays["callouts"].append(option_callout)
-    delta = volume_delta(display_df.tail(80))
     latest_candle_time = display_df.index.max().strftime("%d %b %H:%M")
     st.caption(
         f"{spec['label']} | Last {last_row.close:,.2f} | "
