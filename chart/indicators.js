@@ -32,6 +32,7 @@ class IndicatorEngine {
         this.alphaTrendLayer = this.createAlphaTrendLayer();
         this.zoneLayer = this.createZoneLayer();
         this.labelLayer = this.createLabelLayer();
+        this.calloutLayer = this.createCalloutLayer();
         this.chart.timeScale().subscribeVisibleLogicalRangeChange(()=>{
             this.scheduleOverlayRender();
         });
@@ -84,6 +85,16 @@ class IndicatorEngine {
         const parent = this.chartEngine.container.parentElement;
         const layer = document.createElement("div");
         layer.className = "labelLayer";
+        parent.appendChild(layer);
+        return layer;
+
+    }
+
+    createCalloutLayer(){
+
+        const parent = this.chartEngine.container.parentElement;
+        const layer = document.createElement("div");
+        layer.className = "calloutLayer";
         parent.appendChild(layer);
         return layer;
 
@@ -456,12 +467,27 @@ class IndicatorEngine {
 
     setCallouts(callouts){
 
-        this.setLabels("callout", (callouts || []).map(callout=>({
+        const items = callouts || [];
+        this.setLabels("callout", items.filter(callout=>callout.placement !== "topLeft").map(callout=>({
             time: callout.time,
             price: callout.price,
             text: callout.label,
             tone: callout.tone || (callout.direction === "bullish" ? "buy" : "sell")
         })));
+        this.renderCornerCallouts(items.filter(callout=>callout.placement === "topLeft"));
+
+    }
+
+    renderCornerCallouts(callouts){
+
+        if(!this.calloutLayer) return;
+        this.calloutLayer.innerHTML = "";
+        callouts.slice(-4).forEach(callout=>{
+            const item = document.createElement("div");
+            item.className = `cornerCallout ${callout.tone || "neutral"}`;
+            item.textContent = callout.label || "";
+            this.calloutLayer.appendChild(item);
+        });
 
     }
 
@@ -681,6 +707,8 @@ class IndicatorEngine {
 
             const box = document.createElement("div");
             box.className = `zoneBox ${zone.kind || ""} ${zone.direction || ""}`;
+            const isHigherTimeframe = zone.sourceTf === "15m" || zone.sourceTf === "30m";
+            if(isHigherTimeframe) box.classList.add("higherTimeframe");
             box.style.left = `${left}px`;
             box.style.top = `${top}px`;
             box.style.width = `${width}px`;
@@ -693,7 +721,9 @@ class IndicatorEngine {
                 const label = document.createElement("span");
                 label.textContent = zone.label || "";
                 label.style.color = zone.text || zone.border || "#e5e7eb";
-                if(zone.labelPosition === "center"){
+                if(isHigherTimeframe){
+                    label.className = "edgeLabel";
+                }else if(zone.labelPosition === "center"){
                     label.className = "centerLabel";
                 }
                 box.appendChild(label);

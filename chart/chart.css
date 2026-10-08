@@ -102,6 +102,51 @@ html,body{
     z-index:7;
 }
 
+.calloutLayer{
+    position:absolute;
+    top:10px;
+    left:12px;
+    right:12px;
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:6px;
+    pointer-events:none;
+    z-index:12;
+}
+
+.cornerCallout{
+    max-width:min(720px, calc(100% - 24px));
+    padding:6px 10px;
+    border:1px solid currentColor;
+    border-radius:5px;
+    box-shadow:0 2px 8px rgba(15,23,42,.16);
+    font-size:12px;
+    font-weight:800;
+    line-height:1.2;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
+.cornerCallout.pressureBuy,
+.cornerCallout.optionPut{
+    background:rgba(6,95,70,.94);
+    color:#a7f3d0;
+}
+
+.cornerCallout.pressureSell,
+.cornerCallout.optionCall{
+    background:rgba(153,27,27,.94);
+    color:#fecaca;
+}
+
+.cornerCallout.pressureNeutral,
+.cornerCallout.optionNeutral{
+    background:rgba(51,65,85,.94);
+    color:#e2e8f0;
+}
+
 .indicatorLabel{
     position:absolute;
     transform:translate(-50%,-120%);
@@ -326,6 +371,10 @@ html,body{
     opacity:.95;
 }
 
+.zoneBox.higherTimeframe{
+    overflow:visible;
+}
+
 .zoneBox span{
     position:absolute;
     right:5px;
@@ -336,6 +385,16 @@ html,body{
     line-height:1;
     white-space:nowrap;
     text-shadow:0 1px 2px rgba(255,255,255,.75);
+}
+
+.zoneBox span.edgeLabel{
+    left:calc(100% + 8px);
+    right:auto;
+    top:50%;
+    transform:translateY(-50%);
+    font-size:12px;
+    font-weight:800;
+    text-shadow:0 1px 2px rgba(255,255,255,.9);
 }
 
 .zoneBox span.centerLabel{
