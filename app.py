@@ -1395,7 +1395,6 @@ def keep_recent_fvg_zones_alive(zones: list[dict], chart_df: pd.DataFrame, chart
     last_ts = int(chart_df.index.max().timestamp())
     cutoff_ts = int((chart_df.index.max() - timedelta(days=FVG_LOOKBACK_DAYS)).timestamp())
     extend_to = last_ts + max(timeframe_seconds(chart_resolution), 300)
-    latest_chart_date = pd.Timestamp.fromtimestamp(last_ts, tz="Asia/Kolkata").date()
     active_zones = []
     for zone in zones:
         if zone.get("kind") != "fvg":
@@ -1404,18 +1403,6 @@ def keep_recent_fvg_zones_alive(zones: list[dict], chart_df: pd.DataFrame, chart
         start_time = int(zone.get("startTime") or zone.get("time") or 0)
         if start_time < cutoff_ts:
             continue
-        source_tf = str(zone.get("sourceTf") or "")
-        if source_tf in {"15m", "30m"}:
-            zone_date = pd.Timestamp.fromtimestamp(start_time, tz="Asia/Kolkata").date()
-            if zone_date < latest_chart_date:
-                # Completed-day higher-timeframe zones remain within the day
-                # that created them; they do not stretch across today's chart.
-                day_end = datetime.combine(zone_date, time(15, 30), tzinfo=IST)
-                original_end = int(zone.get("endTime") or start_time)
-                end_time = min(max(original_end, start_time), int(day_end.timestamp()))
-                active_zones.append({**zone, "endTime": end_time})
-                continue
-        # Live/current-day 15m and 30m zones extend only to the latest candle.
         active_zones.append({**zone, "endTime": max(int(zone.get("endTime") or start_time), extend_to)})
     return active_zones
 
