@@ -840,12 +840,13 @@ def option_volume_callout(chain_df: pd.DataFrame, timestamp: int, price: float) 
     ratio_text = f"PE {ratio:.2f}x CE" if dominant == "PUT" and ratio is not None else (
         f"CE {ratio:.2f}x PE" if dominant == "CALL" and ratio is not None else "BALANCED"
     )
+    pressure = "BUYING" if dominant == "CALL" else "SELLING" if dominant == "PUT" else "BALANCED"
     return {
         "time": int(timestamp),
         "price": float(price),
-        "label": f"OPTION VOLUME: {ratio_text} | PE {compact_number(put_volume)} / CE {compact_number(call_volume)}",
-        "tone": tone,
-        "direction": "bullish" if dominant == "PUT" else "bearish" if dominant == "CALL" else "neutral",
+        "label": f"OPTION PRESSURE: {pressure} {ratio_text} | PE {compact_number(put_volume)} / CE {compact_number(call_volume)}",
+        "tone": "pressureBuy" if pressure == "BUYING" else "pressureSell" if pressure == "SELLING" else "pressureNeutral",
+        "direction": "bullish" if pressure == "BUYING" else "bearish" if pressure == "SELLING" else "neutral",
     }
 
 
