@@ -850,11 +850,14 @@ def option_volume_callout(chain_df: pd.DataFrame, timestamp: int, price: float) 
 
 
 def option_chart_pressure(chain_df: pd.DataFrame, side: str, strike: int | None = None) -> dict | None:
-    """Compare total PE/CE volume for the selected option chart."""
+    """Compare aggregate CE/PE volume using the same totals as the history table.
+
+    The chart is for a selected strike, but the pressure label is intentionally
+    based on the full option-chain totals so it agrees with Option Flow History.
+    """
     if chain_df.empty or not {"type", "volume"}.issubset(chain_df.columns) or side not in {"CE", "PE"}:
         return None
-    work = chain_df[chain_df["strike"] == strike] if strike is not None and "strike" in chain_df.columns else chain_df
-    totals = work.groupby("type")["volume"].sum()
+    totals = chain_df.groupby("type")["volume"].sum()
     ce_volume = float(totals.get("CE", 0) or 0)
     pe_volume = float(totals.get("PE", 0) or 0)
     if ce_volume <= 0 and pe_volume <= 0:
