@@ -1377,9 +1377,11 @@ def higher_timeframe_fvg_zones(symbol: str, current_resolution: str, nonce: int)
                 {
                     **zone,
                     "label": f"{short_label} FVG - {'BULL' if direction == 'bullish' else 'BEAR'}",
-                    "fill": "rgba(34,197,94,0.12)" if direction == "bullish" else "rgba(239,68,68,0.12)",
-                    "border": "rgba(22,163,74,0.82)" if direction == "bullish" else "rgba(220,38,38,0.82)",
-                    "text": "rgba(22,163,74,0.98)" if direction == "bullish" else "rgba(220,38,38,0.98)",
+                    # Higher-timeframe FVG palette: light grass green for
+                    # bullish gaps and light orange for bearish gaps.
+                    "fill": "rgba(144,238,144,0.28)" if direction == "bullish" else "rgba(255,196,112,0.30)",
+                    "border": "rgba(34,139,34,0.86)" if direction == "bullish" else "rgba(234,140,20,0.88)",
+                    "text": "rgba(25,105,25,0.98)" if direction == "bullish" else "rgba(180,95,5,0.98)",
                     "borderStyle": "solid" if resolution == "30" else "dashed",
                     "sourceTf": short_label,
                 }
