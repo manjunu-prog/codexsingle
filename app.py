@@ -1553,7 +1553,7 @@ def render_market_chart(spec: dict, height: int = 520, strike: int | None = None
             {
                 "time": int(display_df.index[-1].timestamp()),
                 "price": float(pressure["pocPrice"]),
-                "label": f"VOLUME AREA: {dominant.upper()} PRESSURE{ratio_text}",
+                "label": f"CANDLE VOLUME AREA: {dominant.upper()} PRESSURE{ratio_text}",
                 "tone": tone,
                 "placement": "topLeft",
                 "direction": "bullish" if dominant == "buying" else "bearish" if dominant == "selling" else "neutral",
