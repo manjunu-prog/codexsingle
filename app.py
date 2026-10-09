@@ -3,6 +3,7 @@
 import html
 import json
 import os
+import datetime as datetime_module
 from datetime import datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -1395,7 +1396,7 @@ def keep_recent_fvg_zones_alive(zones: list[dict], chart_df: pd.DataFrame, chart
     last_ts = int(chart_df.index.max().timestamp())
     cutoff_ts = int((chart_df.index.max() - timedelta(days=FVG_LOOKBACK_DAYS)).timestamp())
     extend_to = last_ts + max(timeframe_seconds(chart_resolution), 300)
-    latest_chart_date = datetime.fromtimestamp(last_ts, IST).date()
+    latest_chart_date = datetime_module.datetime.fromtimestamp(last_ts, IST).date()
     active_zones = []
     for zone in zones:
         if zone.get("kind") != "fvg":
@@ -1406,7 +1407,7 @@ def keep_recent_fvg_zones_alive(zones: list[dict], chart_df: pd.DataFrame, chart
             continue
         source_tf = str(zone.get("sourceTf") or "")
         if source_tf in {"15m", "30m"}:
-            zone_date = datetime.fromtimestamp(start_time, IST).date()
+            zone_date = datetime_module.datetime.fromtimestamp(start_time, IST).date()
             if zone_date < latest_chart_date:
                 # Completed-day higher-timeframe zones remain within the day
                 # that created them; they do not stretch across today's chart.
