@@ -1544,21 +1544,6 @@ def render_market_chart(spec: dict, height: int = 520, strike: int | None = None
     )
     last_row = display_df.iloc[-1]
     pressure = volume_area_pressure(display_df, bins=int(volume_poc_bins))
-    if pressure.get("pocPrice") is not None and spec["title"] == "Index":
-        dominant = pressure.get("dominant", "neutral")
-        ratio = pressure.get("ratio")
-        ratio_text = f" {ratio:.2f}x" if ratio is not None else ""
-        tone = "pressureBuy" if dominant == "buying" else "pressureSell" if dominant == "selling" else "pressureNeutral"
-        overlays["callouts"].append(
-            {
-                "time": int(display_df.index[-1].timestamp()),
-                "price": float(pressure["pocPrice"]),
-                "label": f"CANDLE VOLUME AREA: {dominant.upper()} PRESSURE{ratio_text}",
-                "tone": tone,
-                "placement": "topLeft",
-                "direction": "bullish" if dominant == "buying" else "bearish" if dominant == "selling" else "neutral",
-            }
-        )
     if spec["title"] == "Index":
         option_callout = option_volume_callout(chain_df, int(display_df.index[-1].timestamp()), float(last_row["close"]))
         if option_callout:
