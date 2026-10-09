@@ -2,11 +2,13 @@
 
 import html
 import json
+import os
 from datetime import datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import requests
 import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
@@ -40,6 +42,7 @@ DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 PREFERENCES_FILE = DATA_DIR / "last_activity.json"
 OPTION_FLOW_HISTORY_FILE = DATA_DIR / "option_flow_history.json"
+OPTION_FLOW_SUPABASE_TABLE = "option_flow_snapshots"
 INDICATOR_OPTIONS = [
     "AlphaTrend",
     "EMA",
@@ -109,6 +112,9 @@ def save_preferences(values: dict) -> None:
 
 
 def load_option_flow_history(symbol: str, session_date: str) -> list[dict]:
+    supabase_rows = load_option_flow_history_supabase(symbol, session_date)
+    if supabase_rows is not None:
+        return supabase_rows[-500:]
     try:
         if not OPTION_FLOW_HISTORY_FILE.exists():
             return []
@@ -120,6 +126,7 @@ def load_option_flow_history(symbol: str, session_date: str) -> list[dict]:
 
 
 def save_option_flow_history(symbol: str, rows: list[dict]) -> None:
+    save_option_flow_history_supabase(symbol, rows)
     try:
         payload = {}
         if OPTION_FLOW_HISTORY_FILE.exists():
@@ -130,6 +137,110 @@ def save_option_flow_history(symbol: str, rows: list[dict]) -> None:
         OPTION_FLOW_HISTORY_FILE.write_text(json.dumps(payload, indent=2))
     except Exception:
         pass
+
+
+def option_flow_supabase_config() -> dict[str, str]:
+    def secret(name: str) -> str:
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+        try:
+            return str(st.secrets.get(name, "")).strip()
+        except Exception:
+            return ""
+
+    url = secret("SUPABASE_URL").rstrip("/")
+    key = secret("SUPABASE_SERVICE_ROLE_KEY") or secret("SUPABASE_KEY") or secret("SUPABASE_ANON_KEY")
+    table = os.getenv("OPTION_FLOW_SUPABASE_TABLE", OPTION_FLOW_SUPABASE_TABLE).strip()
+    if not url or not key:
+        return {}
+    return {"url": url, "key": key, "table": table or OPTION_FLOW_SUPABASE_TABLE}
+
+
+def option_flow_supabase_headers() -> dict[str, str]:
+    cfg = option_flow_supabase_config()
+    return {
+        "apikey": cfg["key"],
+        "Authorization": f"Bearer {cfg['key']}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates",
+    }
+
+
+def load_option_flow_history_supabase(symbol: str, session_date: str) -> list[dict] | None:
+    cfg = option_flow_supabase_config()
+    if not cfg:
+        return None
+    try:
+        response = requests.get(
+            f"{cfg['url']}/rest/v1/{cfg['table']}",
+            params={
+                "select": "*",
+                "symbol": f"eq.{symbol}",
+                "session_date": f"eq.{session_date}",
+                "order": "snapshot_ts.asc",
+                "limit": "500",
+            },
+            headers=option_flow_supabase_headers(),
+            timeout=20,
+        )
+        response.raise_for_status()
+        normalized = []
+        for row in response.json():
+            normalized.append({
+                "date": row.get("session_date"),
+                "time": row.get("snapshot_time"),
+                "pe_volume": row.get("pe_volume", 0),
+                "pe_volume_change": row.get("pe_volume_change"),
+                "ce_volume": row.get("ce_volume", 0),
+                "ce_volume_change": row.get("ce_volume_change"),
+                "pe_oi": row.get("pe_oi", 0),
+                "ce_oi": row.get("ce_oi", 0),
+                "pe_oi_change_abs": row.get("pe_oi_change_abs", 0),
+                "ce_oi_change_abs": row.get("ce_oi_change_abs", 0),
+                "pe_oi_change_pct": row.get("pe_oi_change_pct"),
+                "ce_oi_change_pct": row.get("ce_oi_change_pct"),
+            })
+        return normalized
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def save_option_flow_history_supabase(symbol: str, rows: list[dict]) -> None:
+    cfg = option_flow_supabase_config()
+    if not cfg or not rows:
+        return
+    payload = []
+    for row in rows:
+        if row.get("date") != rows[-1].get("date"):
+            continue
+        payload.append({
+            "snapshot_key": f"{symbol}|{row.get('date')}|{row.get('time')}",
+            "snapshot_ts": f"{row.get('date')}T{row.get('time')}+05:30",
+            "session_date": row.get("date"),
+            "snapshot_time": row.get("time"),
+            "symbol": symbol,
+            **{key: row.get(key) for key in (
+                "pe_volume", "ce_volume", "pe_oi", "ce_oi",
+                "pe_oi_change_abs", "ce_oi_change_abs",
+                "pe_oi_change_pct", "ce_oi_change_pct",
+                "pe_volume_change", "ce_volume_change",
+            )},
+        })
+    if not payload:
+        return
+    try:
+        response = requests.post(
+            f"{cfg['url']}/rest/v1/{cfg['table']}",
+            params={"on_conflict": "snapshot_key"},
+            headers=option_flow_supabase_headers(),
+            json=payload,
+            timeout=20,
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        # Local JSON remains the operational fallback if Supabase is unavailable.
+        return
 
 
 def option_flow_history_snapshot(chain_df: pd.DataFrame) -> dict | None:
