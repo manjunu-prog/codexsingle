@@ -278,6 +278,13 @@ def record_option_flow_snapshot(symbol: str, chain_df: pd.DataFrame) -> list[dic
     now = datetime.now(ZoneInfo("Asia/Kolkata"))
     session_date = now.date().isoformat()
     rows = load_option_flow_history(symbol, session_date)
+
+    # When Supabase is configured, GitHub Actions is the single writer on its
+    # five-minute schedule. Streamlit refreshes must remain read-only; otherwise
+    # the app's auto-refresh can create duplicate rows every few seconds.
+    if option_flow_supabase_config():
+        return rows
+
     snapshot = option_flow_history_snapshot(chain_df)
     if snapshot is None:
         return rows
