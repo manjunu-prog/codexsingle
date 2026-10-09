@@ -1377,11 +1377,10 @@ def higher_timeframe_fvg_zones(symbol: str, current_resolution: str, nonce: int)
                 {
                     **zone,
                     "label": f"{short_label} FVG - {'BULL' if direction == 'bullish' else 'BEAR'}",
-                    # Higher-timeframe FVG palette: light grass green for
-                    # bullish gaps and light orange for bearish gaps.
-                    "fill": "rgba(134,239,172,0.10)" if direction == "bullish" else "rgba(251,191,36,0.10)",
-                    "border": "rgba(34,197,94,0.72)" if direction == "bullish" else "rgba(245,158,11,0.78)",
-                    "text": "rgba(22,101,52,0.96)" if direction == "bullish" else "rgba(146,86,5,0.96)",
+                    # Keep the original FVG palette for higher timeframes.
+                    "fill": "rgba(34,197,94,0.12)" if direction == "bullish" else "rgba(239,68,68,0.12)",
+                    "border": "rgba(22,163,74,0.82)" if direction == "bullish" else "rgba(220,38,38,0.82)",
+                    "text": "rgba(22,163,74,0.98)" if direction == "bullish" else "rgba(220,38,38,0.98)",
                     "borderStyle": "solid" if resolution == "30" else "dashed",
                     "sourceTf": short_label,
                 }
@@ -1396,6 +1395,7 @@ def keep_recent_fvg_zones_alive(zones: list[dict], chart_df: pd.DataFrame, chart
     last_ts = int(chart_df.index.max().timestamp())
     cutoff_ts = int((chart_df.index.max() - timedelta(days=FVG_LOOKBACK_DAYS)).timestamp())
     extend_to = last_ts + max(timeframe_seconds(chart_resolution), 300)
+    latest_chart_date = datetime.fromtimestamp(last_ts, IST).date()
     active_zones = []
     for zone in zones:
         if zone.get("kind") != "fvg":
@@ -1404,6 +1404,18 @@ def keep_recent_fvg_zones_alive(zones: list[dict], chart_df: pd.DataFrame, chart
         start_time = int(zone.get("startTime") or zone.get("time") or 0)
         if start_time < cutoff_ts:
             continue
+        source_tf = str(zone.get("sourceTf") or "")
+        if source_tf in {"15m", "30m"}:
+            zone_date = datetime.fromtimestamp(start_time, IST).date()
+            if zone_date < latest_chart_date:
+                # Completed-day higher-timeframe zones remain within the day
+                # that created them; they do not stretch across today's chart.
+                day_end = datetime.combine(zone_date, time(15, 30), tzinfo=IST)
+                original_end = int(zone.get("endTime") or start_time)
+                end_time = min(max(original_end, start_time), int(day_end.timestamp()))
+                active_zones.append({**zone, "endTime": end_time})
+                continue
+        # Live/current-day 15m and 30m zones extend only to the latest candle.
         active_zones.append({**zone, "endTime": max(int(zone.get("endTime") or start_time), extend_to)})
     return active_zones
 
