@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import os
+import sys
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
+
+# When launched as `python scripts/collect_option_flow.py`, Python starts with
+# `scripts/` on sys.path. Add the repository root so `api.*` imports resolve.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from api.fyers_login import FyersLogin
 from api.option_chain import OptionChain
