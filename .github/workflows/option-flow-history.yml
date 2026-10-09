@@ -3,8 +3,12 @@ name: Option flow history backup
 on:
   workflow_dispatch:
   schedule:
+    # GitHub cron uses UTC. These entries run every 5 minutes,
+    # Monday-Friday, from 08:00 through 16:00 Asia/Kolkata (IST).
     # GitHub's hosted scheduler has a documented five-minute minimum.
-    - cron: "*/5 * * * *"
+    - cron: "30-59/5 2 * * 1-5"
+    - cron: "*/5 3-9 * * 1-5"
+    - cron: "0-30/5 10 * * 1-5"
 
 jobs:
   collect:
