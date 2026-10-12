@@ -9,8 +9,10 @@ jobs:
   collect:
     runs-on: ubuntu-latest
     timeout-minutes: 4
+
     permissions:
       contents: read
+
     env:
       FYERS_FY_ID: ${{ secrets.FYERS_FY_ID }}
       FYERS_APP_ID: ${{ secrets.FYERS_APP_ID }}
@@ -20,28 +22,24 @@ jobs:
       FYERS_TOTP_KEY: ${{ secrets.FYERS_TOTP_KEY }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      OPTION_FLOW_SYMBOL: NSE:NIFTY50-INDEX
-      OPTION_FLOW_STRIKECOUNT: 10
+      OPTION_FLOW_SYMBOL: "NSE:NIFTY50-INDEX"
+      OPTION_FLOW_STRIKECOUNT: "10"
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - run: python -m pip install --upgrade pip
-      - run: pip install -r requirements.txt
-      - name: Check IST market window
-        id: market_window
+
+      - name: Install dependencies
         run: |
-          hour=$(TZ=Asia/Kolkata date +%H)
-          minute=$(TZ=Asia/Kolkata date +%M)
-          total=$((10#$hour * 60 + 10#$minute))
-          if [ "$total" -ge 480 ] && [ "$total" -le 960 ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Outside the 08:00-16:00 IST collection window."
-          fi
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
       - name: Collect option flow
-        if: steps.market_window.outputs.run == 'true'
-        run: PYTHONPATH=. python collect_option_flow.py
+        run: |
+          PYTHONPATH=. python collect_option_flow.py
