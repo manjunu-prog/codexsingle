@@ -3,9 +3,14 @@ name: Option flow history backup
 on:
   workflow_dispatch:
   schedule:
-    # GitHub cron uses UTC. The job guard below limits execution to
-    # 08:00-16:00 Asia/Kolkata (IST), Monday-Friday.
-    - cron: "*/5 2-10 * * 1-5"
+    # 08:00 to 08:55 IST (02:30 to 02:55 UTC)
+    - cron: "30,35,40,45,50,55 2 * * 1-5"
+
+    # 09:00 to 15:55 IST (03:00 to 09:55 UTC)
+    - cron: "*/5 3-9 * * 1-5"
+
+    # 16:00 to 16:30 IST (10:00 to 10:30 UTC)
+    - cron: "0,5,10,15,20,25,30 10 * * 1-5"
 
 jobs:
   collect:
