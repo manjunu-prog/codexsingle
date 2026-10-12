@@ -263,6 +263,22 @@ def record_option_flow_snapshot(symbol: str, chain_df: pd.DataFrame) -> list[dic
     session_date = now.date().isoformat()
     rows = load_option_flow_history(symbol, session_date)
 
+    # Streamlit may rerun for widget/chart events before the intended
+    # auto-refresh interval. Respect the configured refresh cadence so those
+    # reruns do not create second-by-second history rows.
+    if rows:
+        try:
+            last_dt = datetime.combine(
+                now.date(),
+                datetime.strptime(str(rows[-1].get("time", "")), "%H:%M:%S").time(),
+                tzinfo=now.tzinfo,
+            )
+            refresh_interval = max(60, int(globals().get("refresh_seconds", 300)))
+            if (now - last_dt).total_seconds() < refresh_interval:
+                return rows
+        except (TypeError, ValueError):
+            pass
+
     snapshot = option_flow_history_snapshot(chain_df)
     if snapshot is None:
         return rows
