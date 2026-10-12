@@ -3,17 +3,7 @@ name: Option flow history backup
 on:
   workflow_dispatch:
   schedule:
-    # 08:00–08:55 IST
-    - cron: "30,35,40,45,50,55 2 * * 1-5"
-    - cron: "0,5,10,15,20,25 3 * * 1-5"
-
-    # 09:00–15:55 IST
-    - cron: "30,35,40,45,50,55 3 * * 1-5"
-    - cron: "*/5 4-9 * * 1-5"
-    - cron: "0,5,10,15,20,25 10 * * 1-5"
-
-    # 16:00–16:25 IST
-    - cron: "30,35,40,45,50,55 10 * * 1-5"
+    - cron: "*/5 * * * *"
 
 jobs:
   collect:
