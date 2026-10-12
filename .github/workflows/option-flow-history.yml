@@ -51,4 +51,4 @@ jobs:
           fi
       - name: Collect option flow
         if: steps.market_window.outputs.run == 'true'
-        run: PYTHONPATH=. python scripts/collect_option_flow.py
+        run: PYTHONPATH=. python collect_option_flow.py
