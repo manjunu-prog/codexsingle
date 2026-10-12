@@ -43,6 +43,8 @@ DATA_DIR.mkdir(exist_ok=True)
 PREFERENCES_FILE = DATA_DIR / "last_activity.json"
 OPTION_FLOW_HISTORY_FILE = DATA_DIR / "option_flow_history.json"
 OPTION_FLOW_SUPABASE_TABLE = "option_flow_snapshots"
+OPTION_FLOW_DIRECT_FYERS = False
+OPTION_FLOW_INTERVAL_SECONDS = 300
 INDICATOR_OPTIONS = [
     "AlphaTrend",
     "EMA",
@@ -111,10 +113,7 @@ def save_preferences(values: dict) -> None:
         pass
 
 
-def load_option_flow_history(symbol: str, session_date: str) -> list[dict]:
-    supabase_rows = load_option_flow_history_supabase(symbol, session_date)
-    if supabase_rows is not None:
-        return supabase_rows[-500:]
+def load_option_flow_history_local(symbol: str, session_date: str) -> list[dict]:
     try:
         if not OPTION_FLOW_HISTORY_FILE.exists():
             return []
@@ -123,6 +122,15 @@ def load_option_flow_history(symbol: str, session_date: str) -> list[dict]:
         return [row for row in rows if row.get("date") == session_date][-500:]
     except Exception:
         return []
+
+
+def load_option_flow_history(symbol: str, session_date: str) -> list[dict]:
+    if OPTION_FLOW_DIRECT_FYERS:
+        return load_option_flow_history_local(symbol, session_date)
+    supabase_rows = load_option_flow_history_supabase(symbol, session_date)
+    if supabase_rows is not None:
+        return supabase_rows[-500:]
+    return load_option_flow_history_local(symbol, session_date)
 
 
 def save_option_flow_history(symbol: str, rows: list[dict]) -> None:
@@ -279,11 +287,22 @@ def record_option_flow_snapshot(symbol: str, chain_df: pd.DataFrame) -> list[dic
     session_date = now.date().isoformat()
     rows = load_option_flow_history(symbol, session_date)
 
-    # When Supabase is configured, GitHub Actions is the single writer on its
-    # five-minute schedule. Streamlit refreshes must remain read-only; otherwise
-    # the app's auto-refresh can create duplicate rows every few seconds.
-    if option_flow_supabase_config():
+    # Supabase mode is read-only; GitHub Actions is its writer. Direct FYERS
+    # mode writes only to the local session cache, throttled below.
+    if option_flow_supabase_config() and not OPTION_FLOW_DIRECT_FYERS:
         return rows
+
+    if rows:
+        try:
+            last_dt = datetime.combine(
+                now.date(),
+                datetime.strptime(str(rows[-1].get("time", "")), "%H:%M:%S").time(),
+                tzinfo=now.tzinfo,
+            )
+            if (now - last_dt).total_seconds() < OPTION_FLOW_INTERVAL_SECONDS:
+                return rows
+        except (TypeError, ValueError):
+            pass
 
     snapshot = option_flow_history_snapshot(chain_df)
     if snapshot is None:
@@ -916,6 +935,11 @@ def render_strike_oi_summary(chain_df: pd.DataFrame, strike: int | None) -> None
 def render_option_flow_history(symbol: str, index_name: str, rows: list[dict]) -> None:
     st.subheader("Option Flow History")
     st.caption("Volume deltas compare with the previous snapshot; OI change uses the option-chain API percentage and absolute change.")
+    st.caption(
+        "Source: FYERS direct (local session cache)"
+        if OPTION_FLOW_DIRECT_FYERS
+        else "Source: Supabase backup"
+    )
     display_df = option_flow_history_display(rows)
     if display_df.empty:
         st.info("Waiting for the first option-chain snapshot.")
@@ -973,6 +997,13 @@ with st.sidebar:
         key="strike_window",
     )
     auto_refresh = st.toggle("Auto refresh", value=bool(preferences.get("auto_refresh", True)), key="auto_refresh")
+    option_flow_source = st.radio(
+        "Option Flow History source",
+        ["Supabase backup", "FYERS direct"],
+        index=1 if preferences.get("option_flow_source") == "FYERS direct" else 0,
+        help="FYERS direct fetches the currently loaded option chain and stores one local row every 5 minutes.",
+    )
+    OPTION_FLOW_DIRECT_FYERS = option_flow_source == "FYERS direct"
     saved_refresh_seconds = preference_number(preferences, "refresh_seconds", 300)
     try:
         saved_refresh_number = int(saved_refresh_seconds or 0)
@@ -1282,6 +1313,7 @@ save_preferences(
         "latest_session_only": bool(latest_session_only),
         "strike_window": int(strike_window),
         "auto_refresh": bool(auto_refresh),
+        "option_flow_source": option_flow_source,
         "refresh_seconds": int(refresh_seconds),
         "selected_ce_strike": int(selected_ce_strike) if selected_ce_strike is not None else None,
         "selected_pe_strike": int(selected_pe_strike) if selected_pe_strike is not None else None,
