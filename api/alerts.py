@@ -30,6 +30,9 @@ class TelegramNotifier:
 
         token = _secret_value("TELEGRAM_BOT_TOKEN")
         raw_chats = _secret_value("TELEGRAM_CHAT_IDS") or os.getenv("TELEGRAM_CHAT_IDS", "")
+        single_chat = _secret_value("TELEGRAM_CHAT_ID")
+        if token and not raw_chats and single_chat:
+            raw_chats = single_chat
         if token and raw_chats:
             for chat_id in raw_chats.replace("\n", ",").split(","):
                 chat_id = chat_id.strip()
