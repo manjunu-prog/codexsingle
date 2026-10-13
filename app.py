@@ -633,7 +633,28 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
         })
     st.caption("Premium ratio compares average SELL-leg LTP with average BUY-leg LTP. Ratio change is measured from the first 5-minute row.")
     st.dataframe(pd.DataFrame(ratio_rows).round(2), hide_index=True, width="stretch")
-    st.dataframe(display.round(2), hide_index=True, width="stretch")
+
+    def pnl_cell_colour(value, column: pd.Series) -> str:
+        if pd.isna(value):
+            return ""
+        negative = column[column < 0]
+        positive = column[column > 0]
+        if value < 0 and not negative.empty:
+            intensity = abs(float(value)) / max(abs(float(negative.min())), 1.0)
+            return f"background-color: rgba(220, 38, 38, {0.12 + 0.68 * intensity:.3f}); color: #fff"
+        if value > 0 and not positive.empty:
+            intensity = float(value) / max(float(positive.max()), 1.0)
+            return f"background-color: rgba(22, 163, 74, {0.12 + 0.68 * intensity:.3f}); color: #fff"
+        return "color: #a1a1aa"
+
+    styled_display = display.round(2).style
+    pnl_columns = [column for column in display.columns if column == "Net P&L" or column.endswith(" P&L")]
+    for column in pnl_columns:
+        styled_display = styled_display.map(
+            lambda value, series=display[column]: pnl_cell_colour(value, series),
+            subset=[column],
+        )
+    st.dataframe(styled_display, hide_index=True, width="stretch")
     csv_data = display.to_csv(index=False).encode("utf-8")
     csv_name = f"{pnl_index_name.lower()}_pnl_5min.csv"
     export_col, telegram_col = st.columns(2)
