@@ -87,6 +87,16 @@ HEATMAP_WINDOWS = {
     "3 Hour": 180,
 }
 
+# Contract sizes can change when the exchanges revise lot specifications.
+# They are defaults only; the analyser exposes the lot size so it can be
+# corrected for the selected contract before calculating P&L.
+DEFAULT_LOT_SIZES = {
+    "NIFTY": 75,
+    "BANKNIFTY": 35,
+    "FINNIFTY": 65,
+    "SENSEX": 20,
+}
+
 
 def secrets_value(key: str, default: str = "") -> str:
     try:
@@ -422,6 +432,234 @@ def load_candles(
 @st.cache_data(ttl=8, show_spinner=False)
 def load_chain(_client, symbol: str, strikecount: int) -> pd.DataFrame:
     return OptionChain(_client).fetch(symbol, strikecount=strikecount)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def load_pnl_leg_candles(_client, symbol: str, session_date: str) -> pd.DataFrame:
+    """Load 5-minute candles for one option leg for the selected session."""
+    candles = HistoricalData(client=_client).get_candles(symbol, "5", days=3)
+    if candles.empty:
+        return candles
+    day = pd.Timestamp(session_date).date()
+    return candles[candles.index.date == day].copy()
+
+
+def pnl_leg_symbol_options(chain_df: pd.DataFrame) -> list[str]:
+    if chain_df.empty or "symbol" not in chain_df.columns:
+        return []
+    return sorted({str(value) for value in chain_df["symbol"].dropna() if str(value)})
+
+
+def pnl_leg_label(symbol: str, chain_df: pd.DataFrame) -> str:
+    if not symbol or chain_df.empty:
+        return symbol or "-"
+    row = chain_df[chain_df["symbol"] == symbol]
+    if row.empty:
+        return symbol
+    item = row.iloc[0]
+    return f"{int(item['strike'])} {item['type']}"
+
+
+def calculate_pnl_analysis(
+    legs: list[dict],
+    client,
+    session_date: str,
+    start_value: time,
+    end_value: time,
+) -> tuple[pd.DataFrame, pd.DataFrame, str | None]:
+    """Return 5-minute leg prices, P&L, and ratio metrics for four legs."""
+    if start_value >= end_value:
+        return pd.DataFrame(), pd.DataFrame(), "End time must be after start time."
+
+    series: dict[str, pd.Series] = {}
+    errors: list[str] = []
+    for index, leg in enumerate(legs, start=1):
+        symbol = leg.get("symbol", "")
+        if not symbol:
+            errors.append(f"Leg {index} has no option selected.")
+            continue
+        try:
+            candles = load_pnl_leg_candles(client, symbol, session_date)
+        except Exception as exc:
+            errors.append(f"Leg {index}: {exc}")
+            continue
+        if candles.empty or "close" not in candles.columns:
+            errors.append(f"Leg {index} has no 5-minute candles for {session_date}.")
+            continue
+        series[f"leg_{index}"] = candles["close"].astype(float)
+
+    if errors:
+        return pd.DataFrame(), pd.DataFrame(), " ".join(errors)
+
+    prices = pd.concat(series, axis=1).sort_index().dropna(how="all")
+    start_dt = pd.Timestamp.combine(pd.Timestamp(session_date).date(), start_value)
+    end_dt = pd.Timestamp.combine(pd.Timestamp(session_date).date(), end_value)
+    prices = prices[(prices.index >= start_dt) & (prices.index <= end_dt)]
+    if prices.empty:
+        return pd.DataFrame(), pd.DataFrame(), "No 5-minute option prices were returned in that time window."
+
+    # The first available 5-minute price at/after the requested start is the
+    # simulated entry price. Forward-fill later missing leg candles so one
+    # temporarily absent quote does not erase the combined P&L row.
+    prices = prices.ffill().dropna()
+    if prices.empty:
+        return pd.DataFrame(), pd.DataFrame(), "No complete four-leg 5-minute rows were returned."
+
+    entry_prices = prices.iloc[0]
+    output = pd.DataFrame(index=prices.index)
+    output.index.name = "Time"
+    output["Net P&L"] = 0.0
+    for index, leg in enumerate(legs, start=1):
+        key = f"leg_{index}"
+        ltp_col = f"L{index} LTP"
+        pnl_col = f"L{index} P&L"
+        quantity = float(leg["lots"]) * float(leg["lot_size"])
+        direction = str(leg["side"]).upper()
+        output[ltp_col] = prices[key]
+        if direction == "BUY":
+            output[pnl_col] = (prices[key] - entry_prices[key]) * quantity
+        else:
+            output[pnl_col] = (entry_prices[key] - prices[key]) * quantity
+        output["Net P&L"] += output[pnl_col]
+
+    # Premium ratio is calculated per option type from the selected leg LTPs.
+    # For a single CE sell at 180 and CE buy at 60 this displays 3.00x,
+    # matching the requested 180/60 ratio. The percentage column shows the
+    # change from the first analysed 5-minute row.
+    for option_type in ("CE", "PE"):
+        sell_indices = [i for i, leg in enumerate(legs, start=1) if leg["type"] == option_type and leg["side"] == "SELL"]
+        buy_indices = [i for i, leg in enumerate(legs, start=1) if leg["type"] == option_type and leg["side"] == "BUY"]
+        if sell_indices and buy_indices:
+            sell = output[[f"L{i} LTP" for i in sell_indices]].mean(axis=1)
+            buy = output[[f"L{i} LTP" for i in buy_indices]].mean(axis=1)
+            ratio = pd.to_numeric(sell.div(buy.replace(0, pd.NA)), errors="coerce")
+            first_ratio = ratio.dropna().iloc[0] if not ratio.dropna().empty else None
+            output[f"{option_type} LTP Ratio"] = ratio
+            output[f"{option_type} Ratio Δ%"] = ((ratio - first_ratio) / first_ratio * 100) if first_ratio else pd.NA
+
+    display = output.reset_index()
+    display["Time"] = display["Time"].dt.strftime("%H:%M")
+    return output, display, None
+
+
+def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_window: int) -> None:
+    st.subheader("P&L 5-min Analyser")
+    st.caption("Choose four option legs. Entry is the first available 5-minute price at or after the start time; P&L is calculated through the selected end time.")
+    pnl_index_options = [name for name in ("NIFTY", "BANKNIFTY", "SENSEX") if name in INDEX_CONFIG]
+    pnl_index_name = st.selectbox("Underlying", pnl_index_options, index=option_index(pnl_index_options, index_name, 0), key="pnl_underlying")
+    if pnl_index_name == index_name:
+        pnl_chain_df = chain_df
+    else:
+        try:
+            pnl_chain_df = load_chain(client, INDEX_CONFIG[pnl_index_name]["spot"], max(strike_window, INDEX_CONFIG[pnl_index_name]["strikecount"]))
+        except Exception as exc:
+            st.error(f"Unable to load {pnl_index_name} option chain: {exc}")
+            return
+    symbols = pnl_leg_symbol_options(pnl_chain_df)
+    if not symbols:
+        st.info("Option-chain data is required before the P&L analyser can be used.")
+        return
+
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    with st.form("pnl_5min_analyser_form", clear_on_submit=False):
+        control_cols = st.columns(4)
+        session_date = control_cols[0].date_input("Trading date", value=today, key="pnl_session_date")
+        start_value = control_cols[1].time_input("Start time", value=time(9, 20), key="pnl_start_time")
+        end_value = control_cols[2].time_input("End time", value=time(15, 10), key="pnl_end_time")
+        lot_size = control_cols[3].number_input(
+            "Lot size",
+            min_value=1,
+            value=int(DEFAULT_LOT_SIZES.get(pnl_index_name, 1)),
+            step=1,
+            key=f"pnl_lot_size:{index_name}",
+            help="Verify the current exchange lot size before using the result.",
+        )
+
+        legs: list[dict] = []
+        for index in range(1, 5):
+            st.markdown(f"**Leg {index}**")
+            cols = st.columns([2.4, 1, 1, 1])
+            selected = cols[0].selectbox(
+                "Strike / type",
+                symbols,
+                format_func=lambda value: pnl_leg_label(value, pnl_chain_df),
+                key=f"pnl_leg_symbol:{index}",
+                label_visibility="collapsed",
+            )
+            side = cols[1].selectbox("Side", ["SELL", "BUY"], key=f"pnl_leg_side:{index}", label_visibility="collapsed")
+            lots = cols[2].number_input("Lots", min_value=1, value=1, step=1, key=f"pnl_leg_lots:{index}", label_visibility="collapsed")
+            selected_row = pnl_chain_df[pnl_chain_df["symbol"] == selected].iloc[0]
+            legs.append({
+                "symbol": selected,
+                "type": str(selected_row["type"]),
+                "side": side,
+                "lots": int(lots),
+                "lot_size": int(lot_size),
+            })
+
+        analyze = st.form_submit_button("Analyze P&L", type="primary", width="stretch")
+
+    if not analyze:
+        return
+
+    raw, display, error = calculate_pnl_analysis(
+        legs,
+        client,
+        session_date.isoformat(),
+        start_value,
+        end_value,
+    )
+    if error:
+        st.error(error)
+        return
+
+    final_pnl = float(raw["Net P&L"].iloc[-1])
+    st.metric("Net P&L at end", f"₹{final_pnl:,.2f}")
+    ratio_rows = []
+    for option_type in ("CE", "PE"):
+        sell_legs = [leg for leg in legs if leg["type"] == option_type and leg["side"] == "SELL"]
+        buy_legs = [leg for leg in legs if leg["type"] == option_type and leg["side"] == "BUY"]
+        sell_lots = sum(leg["lots"] for leg in sell_legs)
+        buy_lots = sum(leg["lots"] for leg in buy_legs)
+        ratio_col = f"{option_type} LTP Ratio"
+        change_col = f"{option_type} Ratio Δ%"
+        ratio_rows.append({
+            "Type": option_type,
+            "SELL lots": sell_lots,
+            "BUY lots": buy_lots,
+            "Lot ratio (SELL:BUY)": f"{sell_lots}:{buy_lots}" if sell_lots and buy_lots else "-",
+            "Current LTP ratio": float(raw[ratio_col].iloc[-1]) if ratio_col in raw and pd.notna(raw[ratio_col].iloc[-1]) else None,
+            "Ratio change %": float(raw[change_col].iloc[-1]) if change_col in raw and pd.notna(raw[change_col].iloc[-1]) else None,
+        })
+    st.caption("Premium ratio compares average SELL-leg LTP with average BUY-leg LTP. Ratio change is measured from the first 5-minute row.")
+    st.dataframe(pd.DataFrame(ratio_rows).round(2), hide_index=True, width="stretch")
+    st.dataframe(display.round(2), hide_index=True, width="stretch")
+    csv_data = display.to_csv(index=False).encode("utf-8")
+    csv_name = f"{pnl_index_name.lower()}_pnl_5min.csv"
+    export_col, telegram_col = st.columns(2)
+    export_col.download_button(
+        "Export P&L CSV",
+        data=csv_data,
+        file_name=csv_name,
+        mime="text/csv",
+        key="export_pnl_5min_csv",
+        width="stretch",
+    )
+    notifier = get_notifier()
+    if telegram_col.button(
+        "Send P&L CSV to Telegram",
+        key="send_pnl_5min_csv",
+        disabled=not notifier.enabled,
+        width="stretch",
+    ):
+        ok, message = notifier.send_document(
+            csv_name,
+            csv_data,
+            caption=f"{pnl_index_name} P&L 5-minute analysis",
+        )
+        (st.success if ok else st.error)(message)
+    if not notifier.enabled:
+        st.caption("Configure Telegram bot recipients to enable P&L CSV delivery.")
 
 
 def quote_number(value: dict, keys: tuple[str, ...]) -> float | None:
@@ -1622,3 +1860,5 @@ for spec, strike in [(ce_chart_spec, selected_ce_strike), (pe_chart_spec, select
     st.subheader(spec["title"])
     render_strike_oi_summary(chain_df, strike)
     render_market_chart(spec, height=760, strike=strike)
+
+render_pnl_analyser(chain_df, client, index_name, strike_window)
