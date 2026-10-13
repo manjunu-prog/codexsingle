@@ -343,24 +343,30 @@ def option_flow_history_display(rows: list[dict]) -> pd.DataFrame:
 
 def option_flow_style(display_df: pd.DataFrame, rows: list[dict]):
     styles = pd.DataFrame("", index=display_df.index, columns=display_df.columns)
-    value_keys = {
-        "PE Vol Δ": "pe_volume_change",
-        "CE Vol Δ": "ce_volume_change",
-        "PE OI Chg %": "pe_oi_change_pct",
-        "PE OI Chg": "pe_oi_change_abs",
-        "CE OI Chg %": "ce_oi_change_pct",
-        "CE OI Chg": "ce_oi_change_abs",
-    }
+    compare_pairs = [
+        ("PE Vol", "pe_volume", "CE Vol", "ce_volume"),
+        ("PE Vol Δ", "pe_volume_change", "CE Vol Δ", "ce_volume_change"),
+        ("PE OI Chg %", "pe_oi_change_pct", "CE OI Chg %", "ce_oi_change_pct"),
+        ("PE OI Chg", "pe_oi_change_abs", "CE OI Chg", "ce_oi_change_abs"),
+    ]
     for row_index, row in enumerate(rows[: len(display_df)]):
-        for column, key in value_keys.items():
+        for left_column, left_key, right_column, right_key in compare_pairs:
             try:
-                value = float(row.get(key))
+                left_value = float(row.get(left_key))
+                right_value = float(row.get(right_key))
             except (TypeError, ValueError):
                 continue
-            if value > 0:
-                styles.at[row_index, column] = "background-color: rgba(22, 163, 74, 0.22); color: #166534"
-            elif value < 0:
-                styles.at[row_index, column] = "background-color: rgba(220, 38, 38, 0.22); color: #991B1B"
+            maximum = max(abs(left_value), abs(right_value), 1.0)
+            if abs(left_value - right_value) < 1e-9:
+                styles.at[row_index, left_column] = "background-color: rgba(234, 179, 8, 0.16); color: #854D0E"
+                styles.at[row_index, right_column] = "background-color: rgba(234, 179, 8, 0.16); color: #854D0E"
+            elif abs(left_value) > abs(right_value):
+                intensity = 0.14 + 0.34 * abs(left_value) / maximum
+                styles.at[row_index, left_column] = f"background-color: rgba(22, 163, 74, {intensity:.3f}); color: #166534"
+                styles.at[row_index, right_column] = "background-color: rgba(220, 38, 38, 0.12); color: #991B1B"
+            else:
+                styles.at[row_index, right_column] = f"background-color: rgba(22, 163, 74, {0.14 + 0.34 * abs(right_value) / maximum:.3f}); color: #166534"
+                styles.at[row_index, left_column] = "background-color: rgba(220, 38, 38, 0.12); color: #991B1B"
     return styles
 
 
@@ -372,20 +378,33 @@ def option_flow_excel_bytes(index_name: str, display_df: pd.DataFrame, rows: lis
         worksheet = writer.sheets["Option Flow"]
         title = workbook.add_format({"bold": True, "font_size": 16, "font_color": "#FFFFFF", "bg_color": "#111827"})
         header = workbook.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#374151", "border": 1, "align": "center"})
-        positive = workbook.add_format({"bg_color": "#DCFCE7", "font_color": "#166534"})
-        negative = workbook.add_format({"bg_color": "#FEE2E2", "font_color": "#991B1B"})
+        stronger = workbook.add_format({"bg_color": "#DCFCE7", "font_color": "#166534"})
+        weaker = workbook.add_format({"bg_color": "#FEE2E2", "font_color": "#991B1B"})
+        equal = workbook.add_format({"bg_color": "#FEF3C7", "font_color": "#854D0E"})
         normal = workbook.add_format()
         worksheet.merge_range(0, 0, 0, max(len(display_df.columns) - 1, 0), f"{index_name} Option Flow History", title)
         for column_index, column in enumerate(display_df.columns):
             worksheet.write(2, column_index, column, header)
             worksheet.set_column(column_index, column_index, max(12, min(22, len(str(column)) + 3)))
         raw_keys = {
+            "PE Vol": "pe_volume",
+            "CE Vol": "ce_volume",
             "PE Vol Δ": "pe_volume_change",
             "CE Vol Δ": "ce_volume_change",
             "PE OI Chg %": "pe_oi_change_pct",
             "PE OI Chg": "pe_oi_change_abs",
             "CE OI Chg %": "ce_oi_change_pct",
             "CE OI Chg": "ce_oi_change_abs",
+        }
+        comparison_pairs = {
+            "PE Vol": ("pe_volume", "ce_volume"),
+            "CE Vol": ("ce_volume", "pe_volume"),
+            "PE Vol Δ": ("pe_volume_change", "ce_volume_change"),
+            "CE Vol Δ": ("ce_volume_change", "pe_volume_change"),
+            "PE OI Chg %": ("pe_oi_change_pct", "ce_oi_change_pct"),
+            "CE OI Chg %": ("ce_oi_change_pct", "pe_oi_change_pct"),
+            "PE OI Chg": ("pe_oi_change_abs", "ce_oi_change_abs"),
+            "CE OI Chg": ("ce_oi_change_abs", "pe_oi_change_abs"),
         }
         for row_index, display_row in display_df.iterrows():
             raw_row = rows[row_index] if row_index < len(rows) else {}
@@ -395,7 +414,12 @@ def option_flow_excel_bytes(index_name: str, display_df: pd.DataFrame, rows: lis
                 if key:
                     try:
                         value = float(raw_row.get(key))
-                        fmt = positive if value > 0 else negative if value < 0 else normal
+                        if column in comparison_pairs:
+                            _, other_key = comparison_pairs[column]
+                            other_value = float(raw_row.get(other_key))
+                            fmt = equal if abs(value - other_value) < 1e-9 else stronger if abs(value) > abs(other_value) else weaker
+                        else:
+                            fmt = normal
                     except (TypeError, ValueError):
                         pass
                 worksheet.write(row_index + 3, column_index, display_row[column], fmt)
