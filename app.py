@@ -341,6 +341,71 @@ def option_flow_history_display(rows: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(display_rows, columns=columns)
 
 
+def option_flow_style(display_df: pd.DataFrame, rows: list[dict]):
+    styles = pd.DataFrame("", index=display_df.index, columns=display_df.columns)
+    value_keys = {
+        "PE Vol Δ": "pe_volume_change",
+        "CE Vol Δ": "ce_volume_change",
+        "PE OI Chg %": "pe_oi_change_pct",
+        "PE OI Chg": "pe_oi_change_abs",
+        "CE OI Chg %": "ce_oi_change_pct",
+        "CE OI Chg": "ce_oi_change_abs",
+    }
+    for row_index, row in enumerate(rows[: len(display_df)]):
+        for column, key in value_keys.items():
+            try:
+                value = float(row.get(key))
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                styles.at[row_index, column] = "background-color: rgba(22, 163, 74, 0.22); color: #166534"
+            elif value < 0:
+                styles.at[row_index, column] = "background-color: rgba(220, 38, 38, 0.22); color: #991B1B"
+    return styles
+
+
+def option_flow_excel_bytes(index_name: str, display_df: pd.DataFrame, rows: list[dict]) -> bytes:
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+        display_df.to_excel(writer, sheet_name="Option Flow", index=False, startrow=2)
+        workbook = writer.book
+        worksheet = writer.sheets["Option Flow"]
+        title = workbook.add_format({"bold": True, "font_size": 16, "font_color": "#FFFFFF", "bg_color": "#111827"})
+        header = workbook.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#374151", "border": 1, "align": "center"})
+        positive = workbook.add_format({"bg_color": "#DCFCE7", "font_color": "#166534"})
+        negative = workbook.add_format({"bg_color": "#FEE2E2", "font_color": "#991B1B"})
+        normal = workbook.add_format()
+        worksheet.merge_range(0, 0, 0, max(len(display_df.columns) - 1, 0), f"{index_name} Option Flow History", title)
+        for column_index, column in enumerate(display_df.columns):
+            worksheet.write(2, column_index, column, header)
+            worksheet.set_column(column_index, column_index, max(12, min(22, len(str(column)) + 3)))
+        raw_keys = {
+            "PE Vol Δ": "pe_volume_change",
+            "CE Vol Δ": "ce_volume_change",
+            "PE OI Chg %": "pe_oi_change_pct",
+            "PE OI Chg": "pe_oi_change_abs",
+            "CE OI Chg %": "ce_oi_change_pct",
+            "CE OI Chg": "ce_oi_change_abs",
+        }
+        for row_index, display_row in display_df.iterrows():
+            raw_row = rows[row_index] if row_index < len(rows) else {}
+            for column_index, column in enumerate(display_df.columns):
+                fmt = normal
+                key = raw_keys.get(column)
+                if key:
+                    try:
+                        value = float(raw_row.get(key))
+                        fmt = positive if value > 0 else negative if value < 0 else normal
+                    except (TypeError, ValueError):
+                        pass
+                worksheet.write(row_index + 3, column_index, display_row[column], fmt)
+        worksheet.freeze_panes(3, 1)
+        worksheet.autofilter(2, 0, 2 + len(display_df), len(display_df.columns) - 1)
+        worksheet.set_landscape()
+        worksheet.fit_to_pages(1, 0)
+    return buffer.getvalue()
+
+
 def option_index(options: list, value, default: int = 0) -> int:
     try:
         return options.index(value)
@@ -1251,8 +1316,9 @@ def render_option_flow_history(symbol: str, index_name: str, rows: list[dict]) -
         st.info("Waiting for the first option-chain snapshot.")
         return
 
-    st.dataframe(display_df, hide_index=True, width="stretch")
+    st.dataframe(display_df.style.apply(lambda _: option_flow_style(display_df, rows), axis=None), hide_index=True, width="stretch")
     csv_data = pd.DataFrame(rows).to_csv(index=False).encode("utf-8")
+    excel_data = option_flow_excel_bytes(index_name, display_df, rows)
     download_col, telegram_col = st.columns(2)
     download_col.download_button(
         "Export Option Flow CSV",
@@ -1260,6 +1326,14 @@ def render_option_flow_history(symbol: str, index_name: str, rows: list[dict]) -
         file_name=f"{index_name.lower()}_option_flow.csv",
         mime="text/csv",
         key="export_option_flow_csv",
+        width="stretch",
+    )
+    download_col.download_button(
+        "Export Option Flow Excel",
+        data=excel_data,
+        file_name=f"{index_name.lower()}_option_flow.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="export_option_flow_excel",
         width="stretch",
     )
     notifier = get_notifier()
