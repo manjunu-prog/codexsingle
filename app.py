@@ -599,6 +599,25 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
 
         analyze = st.form_submit_button("Analyze P&L", type="primary", width="stretch")
 
+    reset_col, _ = st.columns([1, 3])
+    if reset_col.button("Reset P&L Analyser", key="reset_pnl_5min_analyser", width="stretch"):
+        reset_keys = [
+            "pnl_underlying",
+            "pnl_session_date",
+            "pnl_start_time",
+            "pnl_end_time",
+            f"pnl_lot_size:{pnl_index_name}",
+        ]
+        for index in range(1, 5):
+            reset_keys.extend([
+                f"pnl_leg_symbol:{index}",
+                f"pnl_leg_side:{index}",
+                f"pnl_leg_lots:{index}",
+            ])
+        for key in reset_keys:
+            st.session_state.pop(key, None)
+        st.rerun()
+
     if not analyze:
         return
 
