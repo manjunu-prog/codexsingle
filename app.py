@@ -362,11 +362,11 @@ def option_flow_style(display_df: pd.DataFrame, rows: list[dict]):
                 styles.at[row_index, right_column] = "background-color: rgba(234, 179, 8, 0.16); color: #854D0E"
             elif abs(left_value) > abs(right_value):
                 intensity = 0.14 + 0.34 * abs(left_value) / maximum
-                styles.at[row_index, left_column] = f"background-color: rgba(22, 163, 74, {intensity:.3f}); color: #166534"
-                styles.at[row_index, right_column] = "background-color: rgba(220, 38, 38, 0.12); color: #991B1B"
+                styles.at[row_index, left_column] = f"background-color: rgba(22, 163, 74, {intensity:.3f}); color: #FFFFFF; font-weight: 600"
+                styles.at[row_index, right_column] = "background-color: rgba(220, 38, 38, 0.22); color: #FFFFFF; font-weight: 600"
             else:
-                styles.at[row_index, right_column] = f"background-color: rgba(22, 163, 74, {0.14 + 0.34 * abs(right_value) / maximum:.3f}); color: #166534"
-                styles.at[row_index, left_column] = "background-color: rgba(220, 38, 38, 0.12); color: #991B1B"
+                styles.at[row_index, right_column] = f"background-color: rgba(22, 163, 74, {0.14 + 0.34 * abs(right_value) / maximum:.3f}); color: #FFFFFF; font-weight: 600"
+                styles.at[row_index, left_column] = "background-color: rgba(220, 38, 38, 0.22); color: #FFFFFF; font-weight: 600"
     return styles
 
 
