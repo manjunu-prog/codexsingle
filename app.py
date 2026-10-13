@@ -4,6 +4,7 @@ import html
 import json
 import os
 from datetime import datetime, time, timedelta
+from io import BytesIO
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -650,8 +651,9 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
             "Current LTP ratio": float(raw[ratio_col].iloc[-1]) if ratio_col in raw and pd.notna(raw[ratio_col].iloc[-1]) else None,
             "Ratio change %": float(raw[change_col].iloc[-1]) if change_col in raw and pd.notna(raw[change_col].iloc[-1]) else None,
         })
+    ratio_df = pd.DataFrame(ratio_rows)
     st.caption("Premium ratio compares average SELL-leg LTP with average BUY-leg LTP. Ratio change is measured from the first 5-minute row.")
-    st.dataframe(pd.DataFrame(ratio_rows).round(2), hide_index=True, width="stretch")
+    st.dataframe(ratio_df.round(2), hide_index=True, width="stretch")
 
     def pnl_cell_colour(value, column: pd.Series) -> str:
         if pd.isna(value):
@@ -676,9 +678,54 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
     st.dataframe(styled_display, hide_index=True, width="stretch")
     csv_data = display.to_csv(index=False).encode("utf-8")
     csv_name = f"{pnl_index_name.lower()}_pnl_5min.csv"
+    excel_buffer = BytesIO()
+    export_display = display.copy()
+    numeric_columns = export_display.select_dtypes(include="number").columns
+    export_display[numeric_columns] = export_display[numeric_columns].round(2)
+    export_ratio = ratio_df.copy()
+    ratio_numeric_columns = export_ratio.select_dtypes(include="number").columns
+    export_ratio[ratio_numeric_columns] = export_ratio[ratio_numeric_columns].round(2)
+    with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+        export_display.to_excel(writer, sheet_name="P&L Analysis", index=False, startrow=2)
+        export_ratio.to_excel(writer, sheet_name="P&L Analysis", index=False, startrow=len(export_display) + 7)
+        workbook = writer.book
+        worksheet = writer.sheets["P&L Analysis"]
+        title_format = workbook.add_format({"bold": True, "font_size": 16, "font_color": "#FFFFFF", "bg_color": "#111827"})
+        header_format = workbook.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#374151", "border": 1, "align": "center"})
+        section_format = workbook.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#1F2937"})
+        number_format = workbook.add_format({"num_format": "0.00"})
+        worksheet.merge_range(0, 0, 0, max(len(export_display.columns) - 1, 0), f"{pnl_index_name} P&L 5-minute Analysis", title_format)
+        for column_index, column in enumerate(export_display.columns):
+            worksheet.write(2, column_index, column, header_format)
+            worksheet.set_column(column_index, column_index, max(12, min(20, len(str(column)) + 3)), number_format if column != "Time" else None)
+        ratio_header_row = len(export_display) + 7
+        worksheet.write(ratio_header_row - 1, 0, "Ratio Summary", section_format)
+        for column_index, column in enumerate(export_ratio.columns):
+            worksheet.write(ratio_header_row, column_index, column, header_format)
+            worksheet.set_column(column_index, column_index, max(14, min(24, len(str(column)) + 3)))
+        worksheet.freeze_panes(3, 1)
+        worksheet.autofilter(2, 0, 2 + len(export_display), len(export_display.columns) - 1)
+        for column_index, column in enumerate(export_display.columns):
+            if column == "Net P&L" or column.endswith(" P&L"):
+                worksheet.conditional_format(
+                    3, column_index, 2 + len(export_display), column_index,
+                    {"type": "3_color_scale", "min_color": "#FECACA", "mid_color": "#FEF3C7", "max_color": "#BBF7D0"},
+                )
+        worksheet.set_landscape()
+        worksheet.fit_to_pages(1, 0)
+    excel_data = excel_buffer.getvalue()
+    excel_name = f"{pnl_index_name.lower()}_pnl_5min.xlsx"
     export_col, telegram_col = st.columns(2)
     export_col.download_button(
-        "Export P&L CSV",
+        "Export formatted Excel report",
+        data=excel_data,
+        file_name=excel_name,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="export_pnl_5min_excel",
+        width="stretch",
+    )
+    export_col.download_button(
+        "Export raw CSV",
         data=csv_data,
         file_name=csv_name,
         mime="text/csv",
@@ -687,19 +734,19 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
     )
     notifier = get_notifier()
     if telegram_col.button(
-        "Send P&L CSV to Telegram",
+        "Send formatted report to Telegram",
         key="send_pnl_5min_csv",
         disabled=not notifier.enabled,
         width="stretch",
     ):
         ok, message = notifier.send_document(
-            csv_name,
-            csv_data,
+            excel_name,
+            excel_data,
             caption=f"{pnl_index_name} P&L 5-minute analysis",
         )
         (st.success if ok else st.error)(message)
     if not notifier.enabled:
-        st.caption("Configure Telegram bot recipients to enable P&L CSV delivery.")
+        st.caption("Configure Telegram bot recipients to enable report delivery.")
 
 
 def quote_number(value: dict, keys: tuple[str, ...]) -> float | None:
@@ -1008,7 +1055,6 @@ def load_quotes(_client, symbols: list[str]) -> dict[str, dict]:
     return quotes
 
 
-@st.cache_resource(show_spinner=False)
 def get_notifier() -> TelegramNotifier:
     return TelegramNotifier()
 
