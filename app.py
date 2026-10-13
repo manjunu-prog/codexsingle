@@ -547,6 +547,15 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
     st.subheader("P&L 5-min Analyser")
     st.caption("Choose four option legs. Entry is the first available 5-minute price at or after the start time; P&L is calculated through the selected end time.")
     pnl_index_options = [name for name in ("NIFTY", "BANKNIFTY", "SENSEX") if name in INDEX_CONFIG]
+    if st.session_state.pop("pnl_reset_requested", False):
+        reset_keys = [
+            "pnl_underlying", "pnl_session_date", "pnl_start_time", "pnl_end_time",
+            "pnl_analysis",
+            *[f"pnl_lot_size:{name}" for name in pnl_index_options],
+            *[f"pnl_leg_{field}:{index}" for index in range(1, 5) for field in ("symbol", "side", "lots")],
+        ]
+        for key in reset_keys:
+            st.session_state.pop(key, None)
     pnl_index_name = st.selectbox("Underlying", pnl_index_options, index=option_index(pnl_index_options, index_name, 0), key="pnl_underlying")
     if pnl_index_name == index_name:
         pnl_chain_df = chain_df
@@ -602,36 +611,34 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
 
     reset_col, _ = st.columns([1, 3])
     if reset_col.button("Reset P&L Analyser", key="reset_pnl_5min_analyser", width="stretch"):
-        reset_keys = [
-            "pnl_underlying",
-            "pnl_session_date",
-            "pnl_start_time",
-            "pnl_end_time",
-            f"pnl_lot_size:{pnl_index_name}",
-        ]
-        for index in range(1, 5):
-            reset_keys.extend([
-                f"pnl_leg_symbol:{index}",
-                f"pnl_leg_side:{index}",
-                f"pnl_leg_lots:{index}",
-            ])
-        for key in reset_keys:
-            st.session_state.pop(key, None)
+        st.session_state["pnl_reset_requested"] = True
         st.rerun()
 
-    if not analyze:
-        return
-
-    raw, display, error = calculate_pnl_analysis(
-        legs,
-        client,
-        session_date.isoformat(),
-        start_value,
-        end_value,
-    )
-    if error:
-        st.error(error)
-        return
+    if analyze:
+        raw, display, error = calculate_pnl_analysis(
+            legs,
+            client,
+            session_date.isoformat(),
+            start_value,
+            end_value,
+        )
+        if error:
+            st.error(error)
+            return
+        st.session_state["pnl_analysis"] = {
+            "raw": raw,
+            "display": display,
+            "legs": legs,
+            "index_name": pnl_index_name,
+        }
+    else:
+        saved_analysis = st.session_state.get("pnl_analysis")
+        if not saved_analysis:
+            return
+        raw = saved_analysis["raw"]
+        display = saved_analysis["display"]
+        legs = saved_analysis["legs"]
+        pnl_index_name = saved_analysis["index_name"]
 
     final_pnl = float(raw["Net P&L"].iloc[-1])
     st.metric("Net P&L at end", f"₹{final_pnl:,.2f}")
