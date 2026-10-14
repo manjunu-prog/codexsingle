@@ -526,8 +526,8 @@ def load_chain(_client, symbol: str, strikecount: int) -> pd.DataFrame:
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_pnl_leg_candles(_client, symbol: str, session_date: str) -> pd.DataFrame:
-    """Load 5-minute candles for one option leg for the selected session."""
-    candles = HistoricalData(client=_client).get_candles(symbol, "5", days=3)
+    """Load 3-minute candles for one option leg for the selected session."""
+    candles = HistoricalData(client=_client).get_candles(symbol, "3", days=3)
     if candles.empty:
         return candles
     day = pd.Timestamp(session_date).date()
@@ -557,7 +557,7 @@ def calculate_pnl_analysis(
     start_value: time,
     end_value: time,
 ) -> tuple[pd.DataFrame, pd.DataFrame, str | None]:
-    """Return 5-minute leg prices, P&L, and ratio metrics for four legs."""
+    """Return 3-minute leg prices, P&L, and ratio metrics for four legs."""
     if start_value >= end_value:
         return pd.DataFrame(), pd.DataFrame(), "End time must be after start time."
 
@@ -574,7 +574,7 @@ def calculate_pnl_analysis(
             errors.append(f"Leg {index}: {exc}")
             continue
         if candles.empty or "close" not in candles.columns:
-            errors.append(f"Leg {index} has no 5-minute candles for {session_date}.")
+            errors.append(f"Leg {index} has no 3-minute candles for {session_date}.")
             continue
         series[f"leg_{index}"] = candles["close"].astype(float)
 
@@ -586,14 +586,14 @@ def calculate_pnl_analysis(
     end_dt = pd.Timestamp.combine(pd.Timestamp(session_date).date(), end_value)
     prices = prices[(prices.index >= start_dt) & (prices.index <= end_dt)]
     if prices.empty:
-        return pd.DataFrame(), pd.DataFrame(), "No 5-minute option prices were returned in that time window."
+        return pd.DataFrame(), pd.DataFrame(), "No 3-minute option prices were returned in that time window."
 
-    # The first available 5-minute price at/after the requested start is the
+    # The first available 3-minute price at/after the requested start is the
     # simulated entry price. Forward-fill later missing leg candles so one
     # temporarily absent quote does not erase the combined P&L row.
     prices = prices.ffill().dropna()
     if prices.empty:
-        return pd.DataFrame(), pd.DataFrame(), "No complete four-leg 5-minute rows were returned."
+        return pd.DataFrame(), pd.DataFrame(), "No complete four-leg 3-minute rows were returned."
 
     entry_prices = prices.iloc[0]
     output = pd.DataFrame(index=prices.index)
@@ -615,17 +615,17 @@ def calculate_pnl_analysis(
     # Premium ratio is calculated per option type from the selected leg LTPs.
     # For a single CE sell at 180 and CE buy at 60 this displays 3.00x,
     # matching the requested 180/60 ratio. The percentage column shows the
-    # change from the first analysed 5-minute row.
+    # change from the first analysed 3-minute row.
     for option_type in ("CE", "PE"):
         sell_indices = [i for i, leg in enumerate(legs, start=1) if leg["type"] == option_type and leg["side"] == "SELL"]
         buy_indices = [i for i, leg in enumerate(legs, start=1) if leg["type"] == option_type and leg["side"] == "BUY"]
+        pnl_indices = [i for i, leg in enumerate(legs, start=1) if leg["type"] == option_type]
+        output[f"{option_type} Hedge P&L"] = output[[f"L{i} P&L" for i in pnl_indices]].sum(axis=1) if pnl_indices else 0.0
         if sell_indices and buy_indices:
             sell = output[[f"L{i} LTP" for i in sell_indices]].mean(axis=1)
             buy = output[[f"L{i} LTP" for i in buy_indices]].mean(axis=1)
             ratio = pd.to_numeric(sell.div(buy.replace(0, pd.NA)), errors="coerce")
-            first_ratio = ratio.dropna().iloc[0] if not ratio.dropna().empty else None
             output[f"{option_type} LTP Ratio"] = ratio
-            output[f"{option_type} Ratio Δ%"] = ((ratio - first_ratio) / first_ratio * 100) if first_ratio else pd.NA
 
     display = output.reset_index()
     display["Time"] = display["Time"].dt.strftime("%H:%M")
@@ -633,13 +633,13 @@ def calculate_pnl_analysis(
 
 
 def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_window: int) -> None:
-    st.subheader("P&L 5-min Analyser")
-    st.caption("Choose four option legs. Entry is the first available 5-minute price at or after the start time; P&L is calculated through the selected end time.")
+    st.subheader("P&L 3-min Analyser")
+    st.caption("Choose four option legs. Entry is the first available 3-minute price at or after the start time; P&L is calculated through the selected end time.")
     pnl_index_options = [name for name in ("NIFTY", "BANKNIFTY", "SENSEX") if name in INDEX_CONFIG]
     if st.session_state.pop("pnl_reset_requested", False):
         reset_keys = [
             "pnl_underlying", "pnl_session_date", "pnl_start_time", "pnl_end_time",
-            "pnl_analysis",
+            "pnl_analysis_3min",
             *[f"pnl_lot_size:{name}" for name in pnl_index_options],
             *[f"pnl_leg_{field}:{index}" for index in range(1, 5) for field in ("symbol", "side", "lots")],
         ]
@@ -660,7 +660,7 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
         return
 
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
-    with st.form("pnl_5min_analyser_form", clear_on_submit=False):
+    with st.form("pnl_3min_analyser_form", clear_on_submit=False):
         control_cols = st.columns(4)
         session_date = control_cols[0].date_input("Trading date", value=today, key="pnl_session_date")
         start_value = control_cols[1].time_input("Start time", value=time(9, 20), key="pnl_start_time")
@@ -691,6 +691,7 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
             legs.append({
                 "symbol": selected,
                 "type": str(selected_row["type"]),
+                "strike": int(selected_row["strike"]),
                 "side": side,
                 "lots": int(lots),
                 "lot_size": int(lot_size),
@@ -699,7 +700,7 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
         analyze = st.form_submit_button("Analyze P&L", type="primary", width="stretch")
 
     reset_col, _ = st.columns([1, 3])
-    if reset_col.button("Reset P&L Analyser", key="reset_pnl_5min_analyser", width="stretch"):
+    if reset_col.button("Reset P&L Analyser", key="reset_pnl_3min_analyser", width="stretch"):
         st.session_state["pnl_reset_requested"] = True
         st.rerun()
 
@@ -714,14 +715,19 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
         if error:
             st.error(error)
             return
-        st.session_state["pnl_analysis"] = {
+        leg_column_names = {}
+        for index, leg in enumerate(legs, start=1):
+            leg_column_names[f"L{index} LTP"] = f"{leg['strike']} {leg['type']} LTP"
+            leg_column_names[f"L{index} P&L"] = f"{leg['strike']} {leg['type']} P&L"
+        display = display.rename(columns=leg_column_names)
+        st.session_state["pnl_analysis_3min"] = {
             "raw": raw,
             "display": display,
             "legs": legs,
             "index_name": pnl_index_name,
         }
     else:
-        saved_analysis = st.session_state.get("pnl_analysis")
+        saved_analysis = st.session_state.get("pnl_analysis_3min")
         if not saved_analysis:
             return
         raw = saved_analysis["raw"]
@@ -738,17 +744,16 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
         sell_lots = sum(leg["lots"] for leg in sell_legs)
         buy_lots = sum(leg["lots"] for leg in buy_legs)
         ratio_col = f"{option_type} LTP Ratio"
-        change_col = f"{option_type} Ratio Δ%"
         ratio_rows.append({
             "Type": option_type,
             "SELL lots": sell_lots,
             "BUY lots": buy_lots,
             "Lot ratio (SELL:BUY)": f"{sell_lots}:{buy_lots}" if sell_lots and buy_lots else "-",
             "Current LTP ratio": float(raw[ratio_col].iloc[-1]) if ratio_col in raw and pd.notna(raw[ratio_col].iloc[-1]) else None,
-            "Ratio change %": float(raw[change_col].iloc[-1]) if change_col in raw and pd.notna(raw[change_col].iloc[-1]) else None,
+            "Hedge P&L": float(raw[f"{option_type} Hedge P&L"].iloc[-1]),
         })
     ratio_df = pd.DataFrame(ratio_rows)
-    st.caption("Premium ratio compares average SELL-leg LTP with average BUY-leg LTP. Ratio change is measured from the first 5-minute row.")
+    st.caption("Premium ratio compares average SELL-leg LTP with average BUY-leg LTP. Hedge P&L totals all CE or PE legs separately.")
     st.dataframe(ratio_df.round(2), hide_index=True, width="stretch")
 
     def pnl_cell_colour(value, column: pd.Series) -> str:
@@ -773,7 +778,7 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
         )
     st.dataframe(styled_display, hide_index=True, width="stretch")
     csv_data = display.to_csv(index=False).encode("utf-8")
-    csv_name = f"{pnl_index_name.lower()}_pnl_5min.csv"
+    csv_name = f"{pnl_index_name.lower()}_pnl_3min.csv"
     excel_buffer = BytesIO()
     export_display = display.copy()
     numeric_columns = export_display.select_dtypes(include="number").columns
@@ -790,7 +795,7 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
         header_format = workbook.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#374151", "border": 1, "align": "center"})
         section_format = workbook.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#1F2937"})
         number_format = workbook.add_format({"num_format": "0.00"})
-        worksheet.merge_range(0, 0, 0, max(len(export_display.columns) - 1, 0), f"{pnl_index_name} P&L 5-minute Analysis", title_format)
+        worksheet.merge_range(0, 0, 0, max(len(export_display.columns) - 1, 0), f"{pnl_index_name} P&L 3-minute Analysis", title_format)
         for column_index, column in enumerate(export_display.columns):
             worksheet.write(2, column_index, column, header_format)
             worksheet.set_column(column_index, column_index, max(12, min(20, len(str(column)) + 3)), number_format if column != "Time" else None)
@@ -810,14 +815,14 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
         worksheet.set_landscape()
         worksheet.fit_to_pages(1, 0)
     excel_data = excel_buffer.getvalue()
-    excel_name = f"{pnl_index_name.lower()}_pnl_5min.xlsx"
+    excel_name = f"{pnl_index_name.lower()}_pnl_3min.xlsx"
     export_col, telegram_col = st.columns(2)
     export_col.download_button(
         "Export formatted Excel report",
         data=excel_data,
         file_name=excel_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key="export_pnl_5min_excel",
+        key="export_pnl_3min_excel",
         width="stretch",
     )
     export_col.download_button(
@@ -825,20 +830,20 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
         data=csv_data,
         file_name=csv_name,
         mime="text/csv",
-        key="export_pnl_5min_csv",
+        key="export_pnl_3min_csv",
         width="stretch",
     )
     notifier = get_notifier()
     if telegram_col.button(
         "Send formatted report to Telegram",
-        key="send_pnl_5min_csv",
+        key="send_pnl_3min_csv",
         disabled=not notifier.enabled,
         width="stretch",
     ):
         ok, message = notifier.send_document(
             excel_name,
             excel_data,
-            caption=f"{pnl_index_name} P&L 5-minute analysis",
+            caption=f"{pnl_index_name} P&L 3-minute analysis",
         )
         (st.success if ok else st.error)(message)
     if not notifier.enabled:
