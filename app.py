@@ -716,9 +716,13 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
             st.error(error)
             return
         leg_column_names = {}
+        used_leg_labels: dict[str, int] = {}
         for index, leg in enumerate(legs, start=1):
-            leg_column_names[f"L{index} LTP"] = f"{leg['strike']} {leg['type']} LTP"
-            leg_column_names[f"L{index} P&L"] = f"{leg['strike']} {leg['type']} P&L"
+            base_label = f"{leg['strike']} {leg['type']}"
+            used_leg_labels[base_label] = used_leg_labels.get(base_label, 0) + 1
+            suffix = f" ({used_leg_labels[base_label]})" if used_leg_labels[base_label] > 1 else ""
+            leg_column_names[f"L{index} LTP"] = f"{base_label}{suffix} LTP"
+            leg_column_names[f"L{index} P&L"] = f"{base_label}{suffix} P&L"
         display = display.rename(columns=leg_column_names)
         st.session_state["pnl_analysis_3min"] = {
             "raw": raw,
@@ -734,6 +738,10 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
         display = saved_analysis["display"]
         legs = saved_analysis["legs"]
         pnl_index_name = saved_analysis["index_name"]
+        if display.columns.duplicated().any():
+            st.session_state.pop("pnl_analysis_3min", None)
+            st.info("The saved analysis used duplicate leg headers. Please click Analyze P&L again to rebuild it with unique strike labels.")
+            return
 
     final_pnl = float(raw["Net P&L"].iloc[-1])
     st.metric("Net P&L at end", f"₹{final_pnl:,.2f}")
