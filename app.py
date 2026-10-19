@@ -62,6 +62,7 @@ HTF_FVG_TIMEFRAMES = [
     ("30 Min", "30", "30m"),
 ]
 FVG_LOOKBACK_DAYS = 4
+PNL_LEG_COUNT = 2
 TOP_SPOT_QUOTES = {
     "CRUDEOIL": "MCX:CRUDEOIL26JULFUT",
     "BANKNIFTY": INDEX_CONFIG["BANKNIFTY"]["spot"],
@@ -557,7 +558,9 @@ def calculate_pnl_analysis(
     start_value: time,
     end_value: time,
 ) -> tuple[pd.DataFrame, pd.DataFrame, str | None]:
-    """Return 3-minute leg prices, P&L, and ratio metrics for four legs."""
+    """Return 3-minute leg prices, P&L, and ratio metrics for two legs."""
+    if len(legs) != PNL_LEG_COUNT:
+        return pd.DataFrame(), pd.DataFrame(), "Select exactly two option legs."
     if start_value >= end_value:
         return pd.DataFrame(), pd.DataFrame(), "End time must be after start time."
 
@@ -593,7 +596,7 @@ def calculate_pnl_analysis(
     # temporarily absent quote does not erase the combined P&L row.
     prices = prices.ffill().dropna()
     if prices.empty:
-        return pd.DataFrame(), pd.DataFrame(), "No complete four-leg 3-minute rows were returned."
+        return pd.DataFrame(), pd.DataFrame(), "No complete two-leg 3-minute rows were returned."
 
     entry_prices = prices.iloc[0]
     output = pd.DataFrame(index=prices.index)
@@ -634,7 +637,7 @@ def calculate_pnl_analysis(
 
 def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_window: int) -> None:
     st.subheader("P&L 3-min Analyser")
-    st.caption("Choose four option legs. Entry is the first available 3-minute price at or after the start time; P&L is calculated through the selected end time.")
+    st.caption("Choose two option legs. Entry is the first available 3-minute price at or after the start time; P&L is calculated through the selected end time.")
     pnl_index_options = [name for name in ("NIFTY", "BANKNIFTY", "SENSEX") if name in INDEX_CONFIG]
     if st.session_state.pop("pnl_reset_requested", False):
         reset_keys = [
@@ -689,7 +692,7 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
         )
 
         legs: list[dict] = []
-        for index in range(1, 5):
+        for index in range(1, PNL_LEG_COUNT + 1):
             st.markdown(f"**Leg {index}**")
             cols = st.columns([2.4, 1, 1, 1])
             selected = cols[0].selectbox(
@@ -752,6 +755,10 @@ def render_pnl_analyser(chain_df: pd.DataFrame, client, index_name: str, strike_
         display = saved_analysis["display"]
         legs = saved_analysis["legs"]
         pnl_index_name = saved_analysis["index_name"]
+        if len(legs) != PNL_LEG_COUNT:
+            st.session_state.pop("pnl_analysis_3min", None)
+            st.info("The saved analysis used four legs. Please click Analyze P&L again with exactly two legs.")
+            return
         if display.columns.duplicated().any():
             st.session_state.pop("pnl_analysis_3min", None)
             st.info("The saved analysis used duplicate leg headers. Please click Analyze P&L again to rebuild it with unique strike labels.")
