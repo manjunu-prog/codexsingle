@@ -132,6 +132,23 @@ class ChartEngine {
 
             if(!d) return;
 
+            const cursorTime = document.getElementById("cursorTime");
+            if(cursorTime){
+                const rawTime = d.time != null ? d.time : param.time;
+                const date = new Date(Number(rawTime) * 1000);
+                if(!Number.isNaN(date.getTime())){
+                    cursorTime.textContent = `Time:${new Intl.DateTimeFormat("en-IN", {
+                        timeZone: "Asia/Kolkata",
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: false
+                    }).format(date)}`;
+                }
+            }
+
             const el=document.getElementById("ohlc");
 
             if(el){
