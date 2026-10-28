@@ -137,8 +137,11 @@ class ChartEngine {
                 const rawTime = d.time != null ? d.time : param.time;
                 const date = new Date(Number(rawTime) * 1000);
                 if(!Number.isNaN(date.getTime())){
+                    // Candle timestamps are serialized from the app's
+                    // already-localized market-time index. Do not apply the
+                    // IST offset a second time here (09:15 would become 14:45).
                     cursorTime.textContent = `Time:${new Intl.DateTimeFormat("en-IN", {
-                        timeZone: "Asia/Kolkata",
+                        timeZone: "UTC",
                         day: "2-digit",
                         month: "short",
                         year: "numeric",
